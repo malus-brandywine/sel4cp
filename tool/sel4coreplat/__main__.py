@@ -67,7 +67,6 @@ from sel4coreplat.sel4 import (
     Sel4UntypedRetype,
     Sel4IrqControlGet,
     Sel4IrqHandlerSetNotification,
-    Sel4SchedControlConfigureFlags,
     emulate_kernel_boot,
     emulate_kernel_boot_partial,
     UntypedObject,
@@ -76,7 +75,6 @@ from sel4coreplat.sel4 import (
     FIXED_OBJECT_SIZES,
     SEL4_UNTYPED_OBJECT,
     SEL4_CNODE_OBJECT,
-    SEL4_SCHEDCONTEXT_OBJECT,
     SEL4_TCB_OBJECT,
     SEL4_REPLY_OBJECT,
     SEL4_ENDPOINT_OBJECT,
@@ -153,7 +151,6 @@ MONITOR_CONFIG = MonitorConfig(
 INPUT_CAP_IDX = 1
 FAULT_EP_CAP_IDX = 2
 VSPACE_CAP_IDX = 3
-REPLY_CAP_IDX = 4
 BASE_OUTPUT_NOTIFICATION_CAP = 10
 BASE_OUTPUT_ENDPOINT_CAP = BASE_OUTPUT_NOTIFICATION_CAP + 64
 BASE_IRQ_CAP = BASE_OUTPUT_ENDPOINT_CAP + 64
@@ -161,7 +158,6 @@ MAX_SYSTEM_INVOCATION_SIZE = mb(128)
 PD_CAPTABLE_BITS = 12
 PD_CAP_SIZE = 256
 PD_CAP_BITS = int(log2(PD_CAP_SIZE))
-PD_SCHEDCONTEXT_SIZE = (1 << 8)
 
 
 def mr_page_bytes(mr: SysMemoryRegion) -> int:
@@ -538,11 +534,6 @@ class InitSystem:
             assert size is None
             alloc_size = FIXED_OBJECT_SIZES[object_type]
             api_size = 0
-        elif object_type in (SEL4_CNODE_OBJECT, SEL4_SCHEDCONTEXT_OBJECT):
-            assert size is not None
-            assert is_power_of_two(size)
-            api_size = int(log2(size))
-            alloc_size = size * SLOT_SIZE
         else:
             raise Exception(f"Invalid object type: {object_type}")
         allocation = self._kao.alloc(alloc_size, count)
@@ -597,7 +588,6 @@ class BuiltSystem:
     kernel_boot_info: KernelBootInfo
     reserved_region: MemoryRegion
     fault_ep_cap_address: int
-    reply_cap_address: int
     cap_lookup: Dict[int, str]
     tcb_caps: List[int]
     regions: List[Region]
@@ -1077,15 +1067,8 @@ def build_system(
     tcb_names = [f"TCB: PD={pd.name}" for pd in system.protection_domains]
     tcb_objects = init_system.allocate_objects(SEL4_TCB_OBJECT, tcb_names)
     tcb_caps = [tcb_obj.cap_addr for tcb_obj in tcb_objects]
-    schedcontext_names = [f"SchedContext: PD={pd.name}" for pd in system.protection_domains]
-    schedcontext_objects = init_system.allocate_objects(SEL4_SCHEDCONTEXT_OBJECT, schedcontext_names, size=PD_SCHEDCONTEXT_SIZE)
     pp_protection_domains = [pd for pd in system.protection_domains if pd.pp]
     endpoint_names = ["EP: Monitor Fault"] + [f"EP: PD={pd.name}" for pd in pp_protection_domains]
-    reply_names = ["Reply: Monitor"]+ [f"Reply: PD={pd.name}" for pd in system.protection_domains]
-    reply_objects = init_system.allocate_objects(SEL4_REPLY_OBJECT, reply_names)
-    reply_object = reply_objects[0]
-    # FIXME: Probably only need reply objects for PPs
-    pd_reply_objects = reply_objects[1:]
     endpoint_objects = init_system.allocate_objects(SEL4_ENDPOINT_OBJECT, endpoint_names)
     fault_ep_endpoint_object = endpoint_objects[0]
     pp_ep_endpoint_objects = dict(zip(pp_protection_domains, endpoint_objects[1:]))
@@ -1268,11 +1251,6 @@ def build_system(
                 0)
         )
 
-    assert REPLY_CAP_IDX < PD_CAP_SIZE
-    invocation = Sel4CnodeMint(cnode_objects[0].cap_addr, REPLY_CAP_IDX, PD_CAP_BITS, root_cnode_cap, pd_reply_objects[0].cap_addr, kernel_config.cap_address_bits, SEL4_RIGHTS_ALL, 1)
-    invocation.repeat(len(system.protection_domains), cnode=1, src_obj=1)
-    system_invocations.append(invocation)
-
     ## Mint access to the vspace cap
     assert VSPACE_CAP_IDX < PD_CAP_SIZE
     invocation = Sel4CnodeMint(cnode_objects[0].cap_addr, VSPACE_CAP_IDX, PD_CAP_BITS, root_cnode_cap, vspace_objects[0].cap_addr, kernel_config.cap_address_bits, SEL4_RIGHTS_ALL, 0)
@@ -1425,24 +1403,6 @@ def build_system(
 
     # Initialise the TCBs
     #
-    # set scheduling parameters (SetSchedParams)
-    for idx, (pd, schedcontext_obj) in enumerate(zip(system.protection_domains, schedcontext_objects)):
-        # FIXME: We don't use repeat here because in the near future PDs will set the sched params
-        system_invocations.append(
-            Sel4SchedControlConfigureFlags(
-                kernel_boot_info.schedcontrol_cap,
-                schedcontext_obj.cap_addr,
-                pd.budget,
-                pd.period,
-                0,
-                0x100 + idx,
-                0
-            )
-        )
-
-    for tcb_obj, schedcontext_obj, pd in zip(tcb_objects, schedcontext_objects, system.protection_domains):
-        system_invocations.append(Sel4TcbSetSchedParams(tcb_obj.cap_addr, INIT_TCB_CAP_ADDRESS, pd.priority, pd.priority, schedcontext_obj.cap_addr, fault_ep_endpoint_object.cap_addr))
-
     # set vspace / cspace (SetSpace)
     invocation = Sel4TcbSetSpace(tcb_objects[0].cap_addr, badged_fault_ep, cnode_objects[0].cap_addr, kernel_config.cap_address_bits - PD_CAP_BITS, vspace_objects[0].cap_addr, 0)
     invocation.repeat(len(system.protection_domains), tcb=1, fault_ep=1, cspace_root=1, vspace_root=1)
@@ -1511,7 +1471,6 @@ def build_system(
         kernel_boot_info = kernel_boot_info,
         reserved_region = reserved_region,
         fault_ep_cap_address = fault_ep_endpoint_object.cap_addr,
-        reply_cap_address = reply_object.cap_addr,
         cap_lookup = cap_address_names,
         tcb_caps = tcb_caps,
         regions = regions,
@@ -1683,7 +1642,6 @@ def main() -> int:
 
     tcb_caps = built_system.tcb_caps
     monitor_elf.write_symbol("fault_ep", pack("<Q", built_system.fault_ep_cap_address))
-    monitor_elf.write_symbol("reply", pack("<Q", built_system.reply_cap_address))
     monitor_elf.write_symbol("tcbs", pack("<Q" + "Q" * len(tcb_caps), 0, *tcb_caps))
     names_array = bytearray([0] * (64 * 16))
     for idx, pd in enumerate(system_description.protection_domains, 1):

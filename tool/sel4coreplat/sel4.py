@@ -17,8 +17,7 @@ SLOT_SIZE = 1 << SLOT_BITS
 
 SEL4_TCB_SIZE = (1 << 11)
 SEL4_ENDPOINT_SIZE = (1 << 4)
-SEL4_NOTIFICATION_SIZE = (1 << 6)
-SEL4_REPLY_SIZE = (1 << 5)
+SEL4_NOTIFICATION_SIZE = (1 << 5)
 SEL4_PAGE_TABLE_SIZE = (1 << 12)
 SEL4_PAGE_DIRECTORY_SIZE = (1 << 12)
 SEL4_PAGE_UPPER_DIRECTORY_SIZE = (1 << 12)
@@ -36,16 +35,14 @@ SEL4_TCB_OBJECT = 1
 SEL4_ENDPOINT_OBJECT = 2
 SEL4_NOTIFICATION_OBJECT = 3
 SEL4_CNODE_OBJECT = 4
-SEL4_SCHEDCONTEXT_OBJECT = 5
-SEL4_REPLY_OBJECT = 6
 
-SEL4_HUGE_PAGE_OBJECT = 7
-SEL4_PAGE_UPPER_DIRECTORY_OBJECT = 8
-SEL4_PAGE_GLOBAL_DIRECTORY_OBJECT = 9
-SEL4_SMALL_PAGE_OBJECT = 10
-SEL4_LARGE_PAGE_OBJECT = 11
-SEL4_PAGE_TABLE_OBJECT = 12
-SEL4_PAGE_DIRECTORY_OBJECT = 13
+SEL4_HUGE_PAGE_OBJECT = 5
+SEL4_PAGE_UPPER_DIRECTORY_OBJECT = 6
+SEL4_PAGE_GLOBAL_DIRECTORY_OBJECT = 7
+SEL4_SMALL_PAGE_OBJECT = 8
+SEL4_LARGE_PAGE_OBJECT = 9
+SEL4_PAGE_TABLE_OBJECT = 10
+SEL4_PAGE_DIRECTORY_OBJECT = 11
 
 SEL4_VSPACE_OBJECT = SEL4_PAGE_GLOBAL_DIRECTORY_OBJECT
 
@@ -55,8 +52,6 @@ SEL4_OBJECT_TYPE_NAMES = {
     SEL4_ENDPOINT_OBJECT: "SEL4_ENDPOINT_OBJECT",
     SEL4_NOTIFICATION_OBJECT: "SEL4_NOTIFICATION_OBJECT",
     SEL4_CNODE_OBJECT: "SEL4_CNODE_OBJECT",
-    SEL4_SCHEDCONTEXT_OBJECT: "SEL4_SCHEDCONTEXT_OBJECT",
-    SEL4_REPLY_OBJECT: "SEL4_REPLY_OBJECT",
     SEL4_HUGE_PAGE_OBJECT: "SEL4_HUGE_PAGE_OBJECT",
     SEL4_PAGE_UPPER_DIRECTORY_OBJECT: "SEL4_PAGE_UPPER_DIRECTORY_OBJECT",
     SEL4_PAGE_GLOBAL_DIRECTORY_OBJECT: "SEL4_PAGE_GLOBAL_DIRECTORY_OBJECT",
@@ -70,7 +65,6 @@ FIXED_OBJECT_SIZES = {
     SEL4_TCB_OBJECT: SEL4_TCB_SIZE,
     SEL4_ENDPOINT_OBJECT: SEL4_ENDPOINT_SIZE,
     SEL4_NOTIFICATION_OBJECT: SEL4_NOTIFICATION_SIZE,
-    SEL4_REPLY_OBJECT: SEL4_REPLY_SIZE,
 
     SEL4_VSPACE_OBJECT: SEL4_VSPACE_SIZE,
     SEL4_PAGE_UPPER_DIRECTORY_OBJECT: SEL4_PAGE_UPPER_DIRECTORY_SIZE,
@@ -84,7 +78,6 @@ FIXED_OBJECT_SIZES = {
 VARIABLE_SIZE_OBJECTS = {
     SEL4_CNODE_OBJECT,
     SEL4_UNTYPED_OBJECT,
-    SEL4_SCHEDCONTEXT_OBJECT,
 }
 
 SEL4_RIGHTS_WRITE = 1
@@ -154,7 +147,6 @@ def calculate_rootserver_size(initial_task_region: MemoryRegion) -> int:
     asid_pool_bits = 12  # seL4_ASIDPoolBits
     vspace_bits = 12  #seL4_VSpaceBits
     page_table_bits = 12  # seL4_PageTableBits
-    min_sched_context_bits = 8 # seL4_MinSchedContextBits
 
     size = 0
     size += 1 << (root_cnode_bits + slot_bits)
@@ -163,7 +155,6 @@ def calculate_rootserver_size(initial_task_region: MemoryRegion) -> int:
     size += 1 << asid_pool_bits
     size += 1 << vspace_bits
     size += _get_arch_n_paging(initial_task_region) * (1 << page_table_bits)
-    size += 1 <<min_sched_context_bits
 
     return size
 
@@ -339,39 +330,32 @@ class Sel4Label(IntEnum):
     IRQClearIRQHandler = 28
     # Domain
     DomainSetSet = 29
-    # Sched
-    SchedControlConfigureFlags = 30
-    SchedContextBind = 31
-    SchedContextUnbind = 32
-    SchedContextUnbindObject = 33
-    SchedContextConsume = 34
-    SchedContextYieldTo = 35
     # ARM V Space
-    ARMVSpaceClean_Data = 36
-    ARMVSpaceInvalidate_Data = 37
-    ARMVSpaceCleanInvalidate_Data = 38
-    ARMVSpaceUnify_Instruction = 39
+    ARMVSpaceClean_Data = 30
+    ARMVSpaceInvalidate_Data = 31
+    ARMVSpaceCleanInvalidate_Data = 32
+    ARMVSpaceUnify_Instruction = 33
     # ARM Page Upper Directory
-    ARMPageUpperDirectoryMap = 40
-    ARMPageUpperDirectoryUnmap = 41
-    ARMPageDirectoryMap = 42
-    ARMPageDirectoryUnmap = 43
+    ARMPageUpperDirectoryMap = 34
+    ARMPageUpperDirectoryUnmap = 35
+    ARMPageDirectoryMap = 36
+    ARMPageDirectoryUnmap = 37
     # ARM Page table
-    ARMPageTableMap = 44
-    ARMPageTableUnmap = 45
+    ARMPageTableMap = 38
+    ARMPageTableUnmap = 39
     # ARM Page
-    ARMPageMap = 46
-    ARMPageUnmap = 47
-    ARMPageClean_Data = 48
-    ARMPageInvalidate_Data = 49
-    ARMPageCleanInvalidate_Data = 50
-    ARMPageUnify_Instruction = 51
-    ARMPageGetAddress = 52
+    ARMPageMap = 40
+    ARMPageUnmap = 41
+    ARMPageClean_Data = 42
+    ARMPageInvalidate_Data = 43
+    ARMPageCleanInvalidate_Data = 44
+    ARMPageUnify_Instruction = 45
+    ARMPageGetAddress = 46
     # ARM Asid
-    ARMASIDControlMakePool = 53
-    ARMASIDPoolAssign = 54
+    ARMASIDControlMakePool = 47
+    ARMASIDPoolAssign = 48
     # ARM IRQ
-    ARMIRQIssueIRQHandlerTrigger = 55
+    ARMIRQIssueIRQHandlerTrigger = 49
 
 
 ### Invocations

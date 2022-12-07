@@ -88,7 +88,6 @@ char _stack[4096];
 static char pd_names[MAX_PDS][MAX_NAME_LEN];
 
 seL4_Word fault_ep;
-seL4_Word reply;
 seL4_Word tcbs[MAX_TCBS];
 
 struct region {
@@ -356,7 +355,7 @@ monitor(void)
         seL4_MessageInfo_t tag;
         seL4_Error err;
 
-        tag = seL4_Recv(fault_ep, &badge, reply);
+        tag = seL4_Recv(fault_ep, &badge);
         label = seL4_MessageInfo_get_label(tag);
 
         seL4_Word tcb_cap = tcbs[badge];

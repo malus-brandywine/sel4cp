@@ -54,12 +54,6 @@ dump_bootinfo(seL4_BootInfo *bi)
     puthex64(bi->userImagePaging.end - 1);
     puts("\n");
 
-    puts("schedcontrol            = ");
-    puthex64(bi->schedcontrol.start);
-    puts("..");
-    puthex64(bi->schedcontrol.end - 1);
-    puts("\n");
-
     puts("userImageFrames         = ");
     puthex64(bi->userImageFrames.start);
     puts("..");

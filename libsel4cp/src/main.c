@@ -13,7 +13,6 @@
 #include <sel4cp.h>
 
 #define INPUT_CAP 1
-#define REPLY_CAP 4
 
 #define NOTIFICATION_BITS 57
 
@@ -53,9 +52,9 @@ handler_loop(void)
         seL4_MessageInfo_t tag;
 
         if (have_reply) {
-            tag = seL4_ReplyRecv(INPUT_CAP, reply_tag, &badge, REPLY_CAP);
+            tag = seL4_ReplyRecv(INPUT_CAP, reply_tag, &badge);
         } else {
-            tag = seL4_Recv(INPUT_CAP, &badge, REPLY_CAP);
+            tag = seL4_Recv(INPUT_CAP, &badge);
         }
 
         uint64_t is_endpoint = badge >> 63;

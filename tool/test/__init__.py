@@ -88,9 +88,6 @@ class ProtectionDomainParseTests(ExtendedTestCase):
     def test_program_image_invalid_attrs(self):
         self._check_error("pd_program_image_invalid_attrs.xml", "Error: invalid attribute 'foo' on element 'program_image': ")
 
-    def test_budget_gt_period(self):
-        self._check_error("pd_budget_gt_period.xml", "Error: budget (1000) must be less than, or equal to, period (100) on element 'protection_domain':")
-
 
 class ChannelParseTests(ExtendedTestCase):
     def test_missing_pd(self):

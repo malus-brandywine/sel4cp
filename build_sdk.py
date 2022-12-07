@@ -52,7 +52,6 @@ SUPPORTED_BOARDS = (
         loader_link_address=0x80280000,
         kernel_options = {
             "KernelPlatform": "tqma8xqp1gb",
-            "KernelIsMCS": True,
             "KernelArmExportPCNTUser": True,
         },
         examples = {
@@ -66,7 +65,6 @@ SUPPORTED_BOARDS = (
         kernel_options = {
             "KernelPlatform": "zynqmp",
             "KernelARMPlatform": "zcu102",
-            "KernelIsMCS": True,
             "KernelArmExportPCNTUser": True,
         },
         examples = {
