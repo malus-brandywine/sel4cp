@@ -97,6 +97,9 @@ class ProtectionDomainParseTests(ExtendedTestCase):
     def test_irq_less_than_0(self):
         self._check_error("irq_id_less_than_0.xml", "Error: id must be >= 0 on element 'irq'")
 
+    def test_irq_invalid_trigger(self):
+        self._check_error("irq_invalid_trigger.xml", "Error: trigger must be either 'level' or 'edge' on element 'irq'")
+
 
 class ChannelParseTests(ExtendedTestCase):
     def test_missing_pd(self):

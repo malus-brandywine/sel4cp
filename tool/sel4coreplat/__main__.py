@@ -66,7 +66,7 @@ from sel4coreplat.sel4 import (
     Sel4CnodeMint,
     Sel4CnodeCopy,
     Sel4UntypedRetype,
-    Sel4IrqControlGet,
+    Sel4IrqControlGetTrigger,
     Sel4IrqHandlerSetNotification,
     Sel4SchedControlConfigureFlags,
     emulate_kernel_boot,
@@ -1168,9 +1168,10 @@ def build_system(
         for sysirq in pd.irqs:
             cap_address = system_cap_address_mask | cap_slot
             system_invocations.append(
-                Sel4IrqControlGet(
+                Sel4IrqControlGetTrigger(
                     IRQ_CONTROL_CAP_ADDRESS,
                     sysirq.irq,
+                    sysirq.trigger.value,
                     root_cnode_cap,
                     cap_address,
                     kernel_config.cap_address_bits
