@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from typing import Dict, Iterable, Optional, Set, Tuple
 
 from sel4coreplat.util import str_to_bool, UserError
+from sel4coreplat.sel4 import Sel4ArmIrqTrigger
 
 MIN_PAGE_SIZE = 0x1000 # FIXME: This shouldn't be here
 
@@ -70,6 +71,7 @@ class SysMap:
 class SysIrq:
     irq: int
     id_: int
+    trigger: str
 
 
 @dataclass(frozen=True, eq=True)
@@ -260,10 +262,17 @@ def xml2pd(pd_xml: ET.Element) -> ProtectionDomain:
                 if setvar_vaddr:
                     setvars.append(SysSetVar(setvar_vaddr, vaddr=vaddr))
             elif child.tag == "irq":
-                _check_attrs(child, ("irq", "id"))
+                _check_attrs(child, ("irq", "id", "trigger"))
                 irq = int(checked_lookup(child, "irq"), base=0)
                 id_ = int(checked_lookup(child, "id"), base=0)
-                irqs.append(SysIrq(irq, id_))
+                trigger_str = child.attrib.get("trigger", "level")
+                if trigger_str == "level":
+                    trigger = Sel4ArmIrqTrigger.Edge
+                elif trigger_str == "edge":
+                    trigger = Sel4ArmIrqTrigger.Level
+                else:
+                    raise UserError(f"Invalid IRQ trigger '{trigger_str}': {child._loc_str}")
+                irqs.append(SysIrq(irq, id_, trigger))
             elif child.tag == "setvar":
                 _check_attrs(child, ("symbol", "region_paddr"))
                 symbol = checked_lookup(child, "symbol")
