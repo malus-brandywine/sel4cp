@@ -267,9 +267,9 @@ def xml2pd(pd_xml: ET.Element) -> ProtectionDomain:
                 id_ = int(checked_lookup(child, "id"), base=0)
                 trigger_str = child.attrib.get("trigger", "level")
                 if trigger_str == "level":
-                    trigger = Sel4ArmIrqTrigger.Edge
-                elif trigger_str == "edge":
                     trigger = Sel4ArmIrqTrigger.Level
+                elif trigger_str == "edge":
+                    trigger = Sel4ArmIrqTrigger.Edge
                 else:
                     raise UserError(f"Invalid IRQ trigger '{trigger_str}': {child._loc_str}")
                 irqs.append(SysIrq(irq, id_, trigger))
