@@ -81,7 +81,9 @@ SUPPORTED_BOARDS = (
             "KernelPlatform": "odroidc2",
             "KernelIsMCS": True,
         },
-        examples = {}
+        examples = {
+            "timer": Path("example/odroidc2/timer")
+        }
     )
 )
 
