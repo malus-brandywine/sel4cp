@@ -113,7 +113,6 @@ INIT_THREAD_IPC_BUFFER_CAP_ADDRESS = 10
 DOMAIN_CAP_ADDRESS = 11
 SMMU_SID_CONTROL_CAP_ADDRESS = 12
 SMMU_CB_CONTROL_CAP_ADDRESS = 13
-INIT_THREAD_SC_CAP_ADDRESS = 14
 
 
 def _get_n_paging(region: MemoryRegion, bits: int) -> int:
@@ -306,23 +305,23 @@ class Sel4Label(IntEnum):
     TCBSetPriority = 6
     TCBSetMCPriority = 7
     TCBSetSchedParams = 8
-    TCBSetTimeoutEndpoint = 9
-    TCBSetIPCBuffer = 10
-    TCBSetSpace = 11
-    TCBSuspend = 12
-    TCBResume = 13
-    TCBBindNotification = 14
-    TCBUnbindNotification = 15
-    TCBSetTLSBase = 16
+    TCBSetIPCBuffer = 9
+    TCBSetSpace = 10
+    TCBSuspend = 11
+    TCBResume = 12
+    TCBBindNotification = 13
+    TCBUnbindNotification = 14
+    TCBSetTLSBase = 15
     # CNode
-    CNodeRevoke = 17
-    CNodeDelete = 18
-    CNodeCancelBadgedSends = 19
-    CNodeCopy = 20
-    CNodeMint = 21
-    CNodeMove = 22
-    CNodeMutate = 23
-    CNodeRotate = 24
+    CNodeRevoke = 16
+    CNodeDelete = 17
+    CNodeCancelBadgedSends = 18
+    CNodeCopy = 19
+    CNodeMint = 20
+    CNodeMove = 21
+    CNodeMutate = 22
+    CNodeRotate = 23
+    CNodeSaveCaller = 24
     # IRQ
     IRQIssueIRQHandler = 25
     IRQAckIRQ = 26
@@ -453,7 +452,7 @@ class Sel4TcbSetSchedParams(Sel4Invocation):
 class Sel4TcbSetSpace(Sel4Invocation):
     _object_type = "TCB"
     _method_name = "SetSpace"
-    _extra_caps = ("fault_ep", "cspace_root", "vspace_root")
+    _extra_caps = ("cspace_root", "vspace_root")
     label = Sel4Label.TCBSetSpace
     tcb: int
     fault_ep: int
@@ -624,19 +623,6 @@ class Sel4CnodeMutate(Sel4Invocation):
     src_depth: int
     badge: int
 
-@dataclass
-class Sel4SchedControlConfigureFlags(Sel4Invocation):
-    _object_type = "SchedControl"
-    _method_name = "ConfigureFlags"
-    _extra_caps = ("schedcontext", )
-    label = Sel4Label.SchedControlConfigureFlags
-    schedcontrol: int
-    schedcontext: int
-    budget: int
-    period: int
-    extra_refills: int
-    badge: int
-    flags: int
 
 @dataclass(frozen=True, eq=True)
 class UntypedObject:
@@ -657,7 +643,6 @@ class UntypedObject:
 @dataclass(frozen=True, eq=True)
 class KernelBootInfo:
     fixed_cap_count: int
-    schedcontrol_cap: int
     paging_cap_count: int
     page_cap_count: int
     untyped_objects: List[UntypedObject]
@@ -824,12 +809,10 @@ def emulate_kernel_boot(
     else:
         raise Exception("Couldn't find appropriate region for initial task kernel objects")
 
-    fixed_cap_count = 0xf
-    sched_control_cap_count = 1
+    fixed_cap_count = 0xe # Comes from seL4_NumInitialCaps
     paging_cap_count = _get_arch_n_paging(initial_task_virt_region)
     page_cap_count = initial_task_virt_region.size // kernel_config.minimum_page_size
-    first_untyped_cap = fixed_cap_count + paging_cap_count + sched_control_cap_count + page_cap_count
-    schedcontrol_cap = fixed_cap_count + paging_cap_count
+    first_untyped_cap = fixed_cap_count + paging_cap_count + page_cap_count
 
     device_regions = reserved_region.aligned_power_of_two_regions() + device_memory.aligned_power_of_two_regions()
     normal_regions = boot_region.aligned_power_of_two_regions() + normal_memory.aligned_power_of_two_regions()
@@ -843,7 +826,6 @@ def emulate_kernel_boot(
         fixed_cap_count = fixed_cap_count,
         paging_cap_count = paging_cap_count,
         page_cap_count = page_cap_count,
-        schedcontrol_cap = schedcontrol_cap,
         first_available_cap = first_untyped_cap + len(device_regions) + len(normal_regions),
         untyped_objects = untyped_objects,
     )

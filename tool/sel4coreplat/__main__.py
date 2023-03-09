@@ -76,7 +76,6 @@ from sel4coreplat.sel4 import (
     SEL4_UNTYPED_OBJECT,
     SEL4_CNODE_OBJECT,
     SEL4_TCB_OBJECT,
-    SEL4_REPLY_OBJECT,
     SEL4_ENDPOINT_OBJECT,
     SEL4_NOTIFICATION_OBJECT,
     SEL4_VSPACE_OBJECT,
@@ -534,6 +533,11 @@ class InitSystem:
             assert size is None
             alloc_size = FIXED_OBJECT_SIZES[object_type]
             api_size = 0
+        elif object_type in (SEL4_CNODE_OBJECT, ):
+            assert size is not None
+            assert is_power_of_two(size)
+            api_size = int(log2(size))
+            alloc_size = size * SLOT_SIZE
         else:
             raise Exception(f"Invalid object type: {object_type}")
         allocation = self._kao.alloc(alloc_size, count)
