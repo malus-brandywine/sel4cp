@@ -1,0 +1,6 @@
+[submodule "capdl/rust-sel4"]
+	path = capdl/rust-sel4
+	url = https://gitlab.com/coliasgroup/rust-sel4.git
+[submodule "capdl/capdl"]
+	path = capdl/capdl
+	url = https://gitlab.com/coliasgroup/capdl.git
