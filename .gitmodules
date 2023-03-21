@@ -4,3 +4,9 @@
 [submodule "capdl/capdl"]
 	path = capdl/capdl
 	url = https://gitlab.com/coliasgroup/capdl.git
+[submodule "capdl/--force"]
+	path = capdl/--force
+	url = https://gitlab.com/coliasgroup/rust-sel4.git
+[submodule "capdl/rust-seL4"]
+	path = capdl/rust-seL4
+	url = https://gitlab.com/coliasgroup/rust-seL4.git

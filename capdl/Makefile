@@ -1,16 +1,19 @@
-.PHONY: none
-none:
+ifeq ($(strip $(BUILD_DIR)),)
+$(error BUILD_DIR must be specified)
+endif
 
-.PHONY: clean
-clean:
-	rm -rf $(BUILD_DIR)
+ifeq ($(strip $(CAPDL_SPEC)),)
+$(error CAPDL_SPEC must be specified)
+endif
 
 GCC_TOOLCHAIN := aarch64-none-elf-
+
+kernel_install_dir := $(BUILD_DIR)/zcu102/debug/sel4/install
 
 ### Common Rust definitions
 
 rust_source_path := rust-seL4
-rust_target_path := support/targets
+rust_target_path := $(rust_source_path)/support/targets
 rust_sel4_target := aarch64-sel4-minimal
 rust_bare_metal_target := aarch64-unknown-none
 target_dir := $(BUILD_DIR)/capdl/target
@@ -28,7 +31,8 @@ CARGO_OPTIONS := \
 	--locked \
 	--manifest-path $(rust_source_path)/Cargo.toml \
 	--target-dir $(abspath $(target_dir)) \
-	--out-dir $(abspath $(BUILD_DIR))
+	--out-dir $(abspath $(BUILD_DIR)) \
+	--config $(abspath $(rust_source_path)/.cargo/config)
 
 CARGO_CROSS_OPTIONS := \
 	$(CARGO_OPTIONS) \
@@ -49,8 +53,8 @@ $(capdl_tool_intermediate):
 	$(MAKE) -C $(capdl_source_dir)/capDL-tool STACK_ROOT=$(abspath $(stack_root))
 
 capdl_loader_crate := capdl-loader-expecting-serialized-spec
-capdl_loader := $(BUILD_DIR)/capdl/$(capdl_loader_crate).elf
-capdl_loader_intermediate := $(BUILD_DIR)/capdl/capdl_loader.intermediate
+capdl_loader := $(BUILD_DIR)/$(capdl_loader_crate).elf
+capdl_loader_intermediate := $(BUILD_DIR)/capdl_loader.intermediate
 
 $(capdl_loader): $(capdl_loader_intermediate)
 
@@ -63,8 +67,8 @@ $(capdl_loader_intermediate):
 			--target $(rust_sel4_target)
 
 capdl_add_spec_to_loader_crate := capdl-add-spec-to-loader
-capdl_add_spec_to_loader := $(BUILD_DIR)/capdl/$(capdl_add_spec_to_loader_crate)
-capdl_add_spec_to_loader_intermediate := $(BUILD_DIR)/capdl/capdl_add_spec_to_loader.intermediate
+capdl_add_spec_to_loader := $(BUILD_DIR)/$(capdl_add_spec_to_loader_crate)
+capdl_add_spec_to_loader_intermediate := $(BUILD_DIR)/capdl_add_spec_to_loader.intermediate
 
 $(capdl_add_spec_to_loader): $(capdl_add_spec_to_loader_intermediate)
 
@@ -79,7 +83,6 @@ $(capdl_add_spec_to_loader_intermediate):
 
 prebuilt_dir := prebuilt
 fill_dir := $(prebuilt_dir)
-spec_cdl := $(prebuilt_dir)/vm_cross_connector.cdl
 spec_json := $(BUILD_DIR)/spec.json
 object_sizes := $(BUILD_DIR)/object-sizes.yaml
 
@@ -89,8 +92,8 @@ $(object_sizes):
 		< $(capdl_source_dir)/object_sizes/object_sizes.yaml \
 		> $@
 
-$(spec_json): $(spec_cdl) $(capdl_tool) $(object_sizes)
-	$(capdl_tool) --object-sizes=$(object_sizes) --json=$@ $(spec_cdl)
+$(spec_json): $(CAPDL_SPEC) $(capdl_tool) $(object_sizes)
+	$(capdl_tool) --object-sizes=$(object_sizes) --json=$@ $(CAPDL_SPEC)
 
 ifeq ($(SMALL),1)
 
@@ -145,10 +148,6 @@ $(loader_intermediate): $(app)
 			-p $(loader_crate) \
 			--target $(rust_bare_metal_target)
 
-# .PHONY: run
-# run: $(loader)
-# 	qemu-system-aarch64 \
-# 		-machine virt,virtualization=on \
-# 		-cpu cortex-a57 -m 2048 \
-# 		-nographic -serial mon:stdio \
-# 		-kernel $<
+.PHONY: run
+run: $(loader)
+	echo "test"
