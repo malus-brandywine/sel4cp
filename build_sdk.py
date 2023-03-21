@@ -360,7 +360,7 @@ def main() -> None:
             ]
             build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, [])
-            build_elf_component("capdl", root_dir, build_dir, board, config, [])
+            # build_elf_component("capdl", root_dir, build_dir, board, config, [])
             build_lib_component("libsel4cp", root_dir, build_dir, board, config)
         # Setup the examples
         for example, example_path in board.examples.items():
@@ -377,17 +377,17 @@ def main() -> None:
                 dest.chmod(0o444)
 
     # At this point we create a tar.gz file
-    with tar_open(tar_file, "w:gz") as tar:
-        tar.add(root_dir, arcname=root_dir.name, filter=tar_filter)
+    # with tar_open(tar_file, "w:gz") as tar:
+    #     tar.add(root_dir, arcname=root_dir.name, filter=tar_filter)
 
-    # Build the source tar
-    process = popen("git ls-files")
-    filenames = [Path(fn.strip()) for fn in process.readlines()]
-    process.close()
-    source_prefix = Path(f"{NAME}-source-{VERSION}")
-    with tar_open(source_tar_file, "w:gz") as tar:
-        for filename in filenames:
-            tar.add(filename, arcname=source_prefix / filename, filter=tar_filter)
+    # # Build the source tar
+    # process = popen("git ls-files")
+    # filenames = [Path(fn.strip()) for fn in process.readlines()]
+    # process.close()
+    # source_prefix = Path(f"{NAME}-source-{VERSION}")
+    # with tar_open(source_tar_file, "w:gz") as tar:
+    #     for filename in filenames:
+    #         tar.add(filename, arcname=source_prefix / filename, filter=tar_filter)
 
 if __name__ == "__main__":
     main()
