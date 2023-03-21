@@ -1,4 +1,3 @@
-#
 # Copyright 2021, Breakaway Consulting Pty. Ltd.
 #
 # SPDX-License-Identifier: BSD-2-Clause
@@ -45,7 +44,10 @@ from os import environ
 from math import log2, ceil
 from sys import argv, executable, stderr
 
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
+
+import capdl
+from sel4coreplat.cdlutil import register_aarch64_sizes, cdlsafe, UpperDir, LowerDir, PTable, PFrame, alignment_of_sort
 
 from sel4coreplat.elf import ElfFile
 from sel4coreplat.util import kb, mb, lsb, msb, round_up, round_down, mask_bits, is_power_of_two, MemoryRegion, UserError
@@ -79,6 +81,7 @@ from sel4coreplat.sel4 import (
     SEL4_ENDPOINT_OBJECT,
     SEL4_NOTIFICATION_OBJECT,
     SEL4_VSPACE_OBJECT,
+    SEL4_PAGE_GLOBAL_DIRECTORY_OBJECT,
     SEL4_PAGE_UPPER_DIRECTORY_OBJECT,
     SEL4_PAGE_DIRECTORY_OBJECT,
     SEL4_SMALL_PAGE_OBJECT,
@@ -104,7 +107,7 @@ from sel4coreplat.sel4 import (
     SEL4_OBJECT_TYPE_NAMES,
 )
 from sel4coreplat.sysxml import ProtectionDomain, xml2system, SystemDescription, PlatformDescription
-from sel4coreplat.sysxml import SysMap, SysMemoryRegion # This shouldn't be needed here as such
+from sel4coreplat.sysxml import SysMap, SysMemoryRegion  # This shouldn't be needed here as such
 from sel4coreplat.loader import Loader
 
 # This is a workaround for: https://github.com/indygreg/PyOxidizer/issues/307
@@ -116,8 +119,9 @@ if argv[0] is None:
 
 
 default_platform_description = PlatformDescription(
-    page_sizes = (0x1_000, 0x200_000)
+    page_sizes=(0x1_000, 0x200_000)
 )
+
 
 @dataclass
 class MonitorConfig:
@@ -131,6 +135,7 @@ class MonitorConfig:
     def max_untyped_objects(self, symbol_size: int) -> int:
         return (symbol_size - self.untyped_info_header_struct.size) // self.untyped_info_object_struct.size
 
+
 # The monitor config is fixed (unless the monitor C code
 # changes the definitions of struct, or the name.
 # While this is fixed, we dynamically determine the
@@ -138,12 +143,12 @@ class MonitorConfig:
 # to allow for minor changes in the C code without requiring
 # rework of this tool
 MONITOR_CONFIG = MonitorConfig(
-    untyped_info_symbol_name = "untyped_info",
-    untyped_info_header_struct = Struct("<QQ"),
-    untyped_info_object_struct = Struct("<QQQ"),
-    bootstrap_invocation_count_symbol_name = "bootstrap_invocation_count",
-    bootstrap_invocation_data_symbol_name = "bootstrap_invocation_data",
-    system_invocation_count_symbol_name = "system_invocation_count",
+    untyped_info_symbol_name="untyped_info",
+    untyped_info_header_struct=Struct("<QQ"),
+    untyped_info_object_struct=Struct("<QQQ"),
+    bootstrap_invocation_count_symbol_name="bootstrap_invocation_count",
+    bootstrap_invocation_data_symbol_name="bootstrap_invocation_data",
+    system_invocation_count_symbol_name="system_invocation_count",
 )
 
 # Will be either the notification or endpoint cap
@@ -184,6 +189,7 @@ class UntypedAllocator:
     def end(self) -> int:
         return self.untyped_object.region.end
 
+
 class KernelObjectAllocator:
     """Allocator for kernel objects.
 
@@ -206,6 +212,7 @@ class KernelObjectAllocator:
     as the allocations are made.
 
     """
+
     def __init__(self, kernel_boot_info: KernelBootInfo) -> None:
         self._allocation_idx = 0
         self._untyped = []
@@ -228,7 +235,7 @@ class KernelObjectAllocator:
                 ut.allocations.append(allocation)
                 return allocation
 
-        raise Exception("Can't alloc - nos pace")
+        raise Exception("Can't alloc - no space")
 
 
 def invocation_to_str(inv: Sel4Invocation, cap_lookup: Dict[int, str]) -> str:
@@ -271,12 +278,11 @@ def overlaps(range1: Tuple[int, int], range2: Tuple[int, int]) -> bool:
     if base1 >= base2 + size2:
         # range1 is completely above range2
         return False
-    if  base1 + size1 <= base2:
+    if base1 + size1 <= base2:
         # range1 is completely below range2
         return False
     # otherwise there is some overlap
     return True
-
 
 
 def phys_mem_regions_from_elf(elf: ElfFile, alignment: int) -> List[MemoryRegion]:
@@ -353,6 +359,7 @@ class FixedUntypedAlloc:
     def __contains__(self, address: int) -> bool:
         return self._ut.region.base <= address < self._ut.region.end
 
+
 @dataclass(frozen=True, eq=True)
 class KernelObject:
     """Represents an allocated kernel object.
@@ -415,16 +422,16 @@ def human_size_strict(size: int) -> str:
 
 class InitSystem:
     def __init__(
-            self,
-            kernel_config: KernelConfig,
-            cnode_cap: int,
-            cnode_mask: int,
-            first_available_cap_slot: int,
-            kernel_object_allocator: KernelObjectAllocator,
-            kernel_boot_info: KernelBootInfo,
-            invocations: List[Sel4Invocation],
-            cap_address_names: Dict[int, str],
-        ):
+        self,
+        kernel_config: KernelConfig,
+        cnode_cap: int,
+        cnode_mask: int,
+        first_available_cap_slot: int,
+        kernel_object_allocator: KernelObjectAllocator,
+        kernel_boot_info: KernelBootInfo,
+        invocations: List[Sel4Invocation],
+        cap_address_names: Dict[int, str],
+    ):
         self._cnode_cap = cnode_cap
         self._cnode_mask = cnode_mask
         self._kernel_config = kernel_config
@@ -448,7 +455,6 @@ class InitSystem:
                 raise Exception(f"Allocation {alloc_ut} ({alloc_phys_addr:x}) not in untyped region {ut._ut.region}")
 
             ut.watermark = alloc_phys_addr
-
 
     def allocate_fixed_objects(self, phys_address: int, object_type: int, count: int, names: List[str]) -> List[KernelObject]:
         """
@@ -495,28 +501,28 @@ class InitSystem:
 
             for sz in padding_sizes:
                 self._invocations.append(Sel4UntypedRetype(
-                        ut._ut.cap,
-                        SEL4_UNTYPED_OBJECT,
-                        int(log2(sz)),
-                        self._cnode_cap,
-                        1,
-                        1,
-                        self._cap_slot,
-                        1
+                    ut._ut.cap,
+                    SEL4_UNTYPED_OBJECT,
+                    int(log2(sz)),
+                    self._cnode_cap,
+                    1,
+                    1,
+                    self._cap_slot,
+                    1
                 ))
                 self._cap_slot += 1
 
         object_cap = self._cap_slot
         self._cap_slot += 1
         self._invocations.append(Sel4UntypedRetype(
-                ut._ut.cap,
-                object_type,
-                0,
-                self._cnode_cap,
-                1,
-                1,
-                object_cap,
-                1
+            ut._ut.cap,
+            object_type,
+            0,
+            self._cnode_cap,
+            1,
+            1,
+            object_cap,
+            1
         ))
 
         ut.watermark = phys_address + alloc_size
@@ -548,14 +554,14 @@ class InitSystem:
         while to_alloc:
             call_count = min(to_alloc, self._kernel_config.fan_out_limit)
             self._invocations.append(Sel4UntypedRetype(
-                    allocation.untyped_cap_address,
-                    object_type,
-                    api_size,
-                    self._cnode_cap,
-                    1,
-                    1,
-                    alloc_cap_slot,
-                    call_count
+                allocation.untyped_cap_address,
+                object_type,
+                api_size,
+                self._cnode_cap,
+                1,
+                1,
+                alloc_cap_slot,
+                call_count
             ))
             to_alloc -= call_count
             alloc_cap_slot += call_count
@@ -598,6 +604,7 @@ class BuiltSystem:
     kernel_objects: List[KernelObject]
     initial_task_virt_region: MemoryRegion
     initial_task_phys_region: MemoryRegion
+    mr_pages: dict[SysMemoryRegion, List[KernelObject]]
 
 
 def _get_full_path(filename: Path, search_paths: List[Path]) -> Path:
@@ -609,15 +616,182 @@ def _get_full_path(filename: Path, search_paths: List[Path]) -> Path:
         raise UserError(f"Error: unable to find program image: '{filename}'")
 
 
+def generate_capdl(system: SystemDescription, search_paths: List[Path], kernel_config: KernelConfig, mr_pages: dict[SysMemoryRegion, List[KernelObject]]) -> capdl.Spec:
+    def get_pgd_slot(x: int) -> int:
+        return (x >> alignment_of_sort[UpperDir]) & ((1 << 9) - 1)
+
+    def get_pud_slot(x: int) -> int:
+        return (x >> alignment_of_sort[LowerDir]) & ((1 << 9) - 1)
+
+    def get_pagedir_slot(x: int) -> int:
+        return (x >> alignment_of_sort[PTable]) & ((1 << 9) - 1)
+
+    def get_pt_slot(x: int) -> int:
+        return (x >> alignment_of_sort[PFrame]) & ((1 << 9) - 1)
+
+    def arm_map_page(cdl_spec: capdl.Spec, pd_name: str, vspace: capdl.PGD, page_cap: capdl.Cap, vaddr: int):
+        assert isinstance(page_cap.referent, capdl.Frame)
+        page_size = page_cap.referent.size
+        assert page_size in [1 << 12, 1 << (12 + 9), 1 << (12 + 9 + 9)]
+        assert vaddr % page_size == 0, f"vaddr 0x{vaddr:x} not aligned to page size ({human_size_strict(page_size)})"
+
+        pgd_slot = get_pgd_slot(vaddr)
+        try:
+            pud = vspace[pgd_slot].referent
+        except KeyError:
+            pud = capdl.PUD(f"pud_{pd_name}_0x{mask_bits(vaddr, 12 + 9 + 9 + 9):x}")
+            cdl_spec.add_object(pud)
+            vspace[pgd_slot] = capdl.Cap(pud)
+        assert isinstance(pud, capdl.PUD)
+
+        pud_slot = get_pud_slot(vaddr)
+        if page_size == (1 << 30):
+            assert pud.slots.get(pud_slot) is None, f"1GiB page already mapped at virtual address {vaddr}"
+            pud[pud_slot] = page_cap
+            return
+        try:
+            pagedir = pud[pud_slot].referent
+        except KeyError:
+            pagedir = capdl.PageDirectory(f"pagedir_{pd_name}_0x{mask_bits(vaddr, 12 + 9 + 9):x}")
+            cdl_spec.add_object(pagedir)
+            pud[pud_slot] = capdl.Cap(pagedir)
+        assert isinstance(pagedir, capdl.PageDirectory)
+
+        pagedir_slot = get_pagedir_slot(vaddr)
+        if page_size == (1 << 21):
+            assert pagedir.slots.get(pagedir_slot) is None, f"2MiB page already mapped at virtual address {vaddr}"
+            pagedir[pagedir_slot] = page_cap
+            return
+        try:
+            pt = pagedir[pagedir_slot].referent
+        except KeyError:
+            pt = capdl.PageTable(f"pt_{pd_name}_0x{mask_bits(vaddr, 12 + 9):x}")
+            cdl_spec.add_object(pt)
+            pagedir[pagedir_slot] = capdl.Cap(pt)
+        assert isinstance(pt, capdl.PageTable)
+
+        pt_slot = get_pt_slot(vaddr)
+        assert pt.slots.get(pt_slot) is None, f"4KiB page already mapped at virtual address {vaddr}"
+        pt[pt_slot] = page_cap
+
+    register_aarch64_sizes()
+    cdl_spec = capdl.Spec(arch="aarch64")
+
+    pd_to_cspace = {}
+    pd_to_ntfn = {}
+    # capdl for pds
+    for pd in system.protection_domains:
+        path = _get_full_path(pd.program_image, search_paths).resolve()
+        elf = capdl.ELF(str(path), name=path.name)
+        elf_spec = elf.get_spec(infer_asid=False)
+        tcb = next(x for x in elf_spec.objs if isinstance(x, capdl.TCB))
+        tcb.sp = elf.get_symbol_vaddr("_stack")
+        tcb.prio = pd.priority
+        vspace = next(x for x in elf_spec.objs if isinstance(x, capdl.PGD))
+        tcb["vspace"] = capdl.Cap(vspace)
+        cdl_spec.merge(elf_spec)
+
+        cspace = capdl.CNode(f"cspace_{pd.name}", size_bits=PD_CAP_BITS)
+        cdl_spec.add_object(cspace)
+        cspace[VSPACE_CAP_IDX] = capdl.Cap(vspace)
+        tcb["cspace"] = capdl.Cap(cspace, guard_size=kernel_config.cap_address_bits - PD_CAP_BITS)
+        pd_to_cspace[pd] = cspace
+
+        ntfn = capdl.Notification(f"ntfn_{pd.name}")
+        cdl_spec.add_object(ntfn)
+        cspace[INPUT_CAP_IDX] = capdl.Cap(ntfn, read=True, write=True)
+        pd_to_ntfn[pd] = ntfn
+
+        sc = capdl.SC(f"sc_{pd.name}")
+        cdl_spec.add_object(sc)
+        tcb["sc_slot"] = capdl.Cap(sc)
+        sc.budget = pd.budget
+        sc.period = pd.period
+
+        reply = capdl.RTReply(f"reply_{pd.name}")
+        cdl_spec.add_object(reply)
+        cspace[REPLY_CAP_IDX] = capdl.Cap(reply)
+
+        vaddr = elf.get_symbol_vaddr("__sel4_ipc_buffer_obj")
+        tcb.addr = vaddr
+        page = capdl.Frame(f"ipcbuf_{pd.name}")
+        cdl_spec.add_object(page)
+        cap = capdl.Cap(page, read=True, write=True)
+        arm_map_page(cdl_spec, pd.name, vspace, cap, vaddr)
+        tcb["ipc_buffer_slot"] = cap
+
+        # FIXME: this modifies the input elfs
+        with open(path, "r+b") as f:
+            for setvar in pd.setvars:
+                if setvar.region_paddr is not None:
+                    mr = next(mr for mr in system.memory_regions if mr.name == setvar.region_paddr)
+                    value = mr_pages[mr][0].phys_addr
+                elif setvar.vaddr is not None:
+                    value = setvar.vaddr
+                assert setvar.region_paddr is not None or setvar.vaddr is not None, setvar
+                symbol = elf._elf.get_section_by_name(".symtab").get_symbol_by_name(setvar.symbol)[0]
+                section = elf._elf.get_section(symbol["st_shndx"])
+                assert section["sh_type"] == "SHT_PROGBITS", "FIXME: symbols must have space reserved for them e.g. in .data, but not .bss"
+                segment = next(s for s in elf._elf.iter_segments() if s.section_in_segment(section))
+                offset = segment["p_offset"] + (symbol.entry["st_value"] - segment.header["p_vaddr"])
+                f.seek(offset)
+                assert value.bit_length() <= kernel_config.word_size
+                assert kernel_config.word_size == 64, "FIXME: we assume addresses are 64 bits"
+                f.write(pack("<Q", value))
+
+        mr_by_name = {mr.name: mr for mr in system.memory_regions}
+        for map in pd.maps:
+            mr = mr_by_name[map.mr]
+            for i in range(mr.page_count):
+                paddr = None if mr.phys_addr is None else mr.phys_addr + i * mr.page_size
+                page = capdl.Frame(f"mr_{map.mr}_{i}", paddr=paddr, size=mr.page_size)
+                cdl_spec.add_object(page)
+                cap = capdl.Cap(page, read="r" in map.perms, write="w" in map.perms, grant="x" in map.perms, cached=map.cached)
+                arm_map_page(cdl_spec, pd.name, vspace, cap, vaddr=map.vaddr + i * mr.page_size)
+
+        for sysirq in pd.irqs:
+            irq = capdl.IRQ(f"irq_{sysirq.irq}", number=sysirq.irq)
+            cdl_spec.add_object(irq)
+            cspace[BASE_IRQ_CAP + sysirq.id_] = capdl.Cap(irq, read=True)
+            cap = capdl.Cap(ntfn, read=True)
+            cap.set_badge(1 << sysirq.id_)
+            irq.set_notification(cap)
+
+        if pd.pp:
+            raise Exception("FIXME: deal with pds with pps")
+
+    for cc in system.channels:
+        pd_a = system.pd_by_name[cc.pd_a]
+        pd_b = system.pd_by_name[cc.pd_b]
+        pd_a_cspace = pd_to_cspace[pd_a]
+        pd_b_cspace = pd_to_cspace[pd_b]
+        pd_a_ntfn = pd_to_ntfn[pd_a]
+        pd_b_ntfn = pd_to_ntfn[pd_b]
+
+        pd_a_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + cc.id_a
+        pd_a_badge = 1 << cc.id_b
+        # FIXME: check rights
+        pd_a_cspace[pd_a_cap_idx] = capdl.Cap(pd_b_ntfn, read=True, write=True, badge=pd_a_badge)
+
+        pd_b_cap_idx = BASE_OUTPUT_NOTIFICATION_CAP + cc.id_b
+        pd_b_badge = 1 << cc.id_a
+        # FIXME: check rights
+        pd_b_cspace[pd_b_cap_idx] = capdl.Cap(pd_a_ntfn, read=True, write=True, badge=pd_b_badge)
+
+        # FIXME: deal with cases where pd_a or pd_b have pps
+
+    return cdl_spec
+
+
 def build_system(
-        kernel_config: KernelConfig,
-        kernel_elf: ElfFile,
-        monitor_elf: ElfFile,
-        system: SystemDescription,
-        invocation_table_size: int,
-        system_cnode_size: int,
-        search_paths: List[Path],
-    ) -> BuiltSystem:
+    kernel_config: KernelConfig,
+    kernel_elf: ElfFile,
+    monitor_elf: ElfFile,
+    system: SystemDescription,
+    invocation_table_size: int,
+    system_cnode_size: int,
+    search_paths: List[Path],
+) -> BuiltSystem:
     """Build system as description by the inputs, with a 'BuiltSystem' object as the output."""
     assert is_power_of_two(system_cnode_size)
     assert invocation_table_size % kernel_config.minimum_page_size == 0
@@ -637,17 +811,17 @@ def build_system(
 
     # Emulate kernel boot
 
-    ## Determine physical memory region used by the monitor
+    # Determine physical memory region used by the monitor
     initial_task_size = phys_mem_region_from_elf(monitor_elf, kernel_config.minimum_page_size).size
 
-    ## Get the elf files for each pd:
+    # Get the elf files for each pd:
     pd_elf_files = {
         pd: ElfFile.from_path(_get_full_path(pd.program_image, search_paths))
         for pd in system.protection_domains
     }
-    ### Here we should validate that ELF files
+    # Here we should validate that ELF files
 
-    ## Determine physical memory region for 'reserved' memory.
+    # Determine physical memory region for 'reserved' memory.
     #
     # The 'reserved' memory region will not be touched by seL4 during boot
     # and allows the monitor (initial task) to create memory regions
@@ -717,7 +891,6 @@ def build_system(
             # pd.maps.append(mp)
         pd_elf_regions[pd] = tuple(elf_regions)
 
-
     # 1.3 With both the initial task region and reserved region determined the kernel
     # boot can be emulated. This provides the boot info information which is needed
     # for the next steps
@@ -773,7 +946,7 @@ def build_system(
     #  slot 1: our main system cnode
     root_cnode_bits = 1
     root_cnode_allocation = kao.alloc((1 << root_cnode_bits) * (1 << SLOT_BITS))
-    root_cnode_cap =  kernel_boot_info.first_available_cap
+    root_cnode_cap = kernel_boot_info.first_available_cap
     cap_address_names[root_cnode_cap] = "CNode: root"
 
     # 2.1.2: Allocate the *system* CNode. It is the cnodes that
@@ -789,15 +962,19 @@ def build_system(
     bootstrap_invocations: List[Sel4Invocation] = []
 
     bootstrap_invocations.append(Sel4UntypedRetype(
-            root_cnode_allocation.untyped_cap_address,
-            SEL4_CNODE_OBJECT,
-            root_cnode_bits,
-            INIT_CNODE_CAP_ADDRESS,
-            0,
-            0,
-            root_cnode_cap,
-            1
+        root_cnode_allocation.untyped_cap_address,  # Z: parent (cap to retype)
+        SEL4_CNODE_OBJECT,                         # Z: type to retype into
+        root_cnode_bits,                           # Z: size
+        INIT_CNODE_CAP_ADDRESS,                    # Z: root
+        0,                                         # Z: node index
+        0,                                         # Z: node depth
+        root_cnode_cap,                            # Z: node offset
+        1                                          # Z: number of caps
     ))
+
+    # Z: Calling Sel4UntypedRetype with second argument equal to SEL4_UNTYPED_OBJECT
+    # Z: simply resizes the given untyped.
+    # Z: However, calling it with SEL4_CNODE_OBJECT creates a new CNode kernel object.
 
     # 2.1.4: Now insert a cap to the initial Cnode into slot zero of the newly
     # allocated root Cnode. It uses sufficient guard bits to ensure it is
@@ -807,15 +984,19 @@ def build_system(
     # which for out purposes is always zero.
     guard = kernel_config.cap_address_bits - root_cnode_bits - kernel_config.init_cnode_bits
     bootstrap_invocations.append(Sel4CnodeMint(
-        root_cnode_cap,
-        0,
-        root_cnode_bits,
-        INIT_CNODE_CAP_ADDRESS,
-        INIT_CNODE_CAP_ADDRESS,
-        kernel_config.cap_address_bits,
-        SEL4_RIGHTS_ALL,
-        guard
+        root_cnode_cap,                                # Z: destination CNode
+        0,                                             # Z: destination index
+        root_cnode_bits,                               # Z: destination depth
+        INIT_CNODE_CAP_ADDRESS,                        # Z: source CNode
+        INIT_CNODE_CAP_ADDRESS,                        # Z: source CSlot index
+        kernel_config.cap_address_bits,                # Z: source depth
+        SEL4_RIGHTS_ALL,                               # Z: rights inherited by minted cap
+        guard                                          # Z: badge
     ))
+
+    # Z: According to the seL4 docs, the 0th CSlot of a CNode is always kept empty.
+    # Z: What gives? Probably means that it's initially kept empty (as opposed to
+    # Z: being uninitialized?)
 
     # 2.1.5: Now it is possible to switch our root Cnode to the newly create
     # root cnode. We have a zero sized guard. This Cnode represents the top
@@ -823,12 +1004,12 @@ def build_system(
     #
     root_guard = 0
     bootstrap_invocations.append(Sel4TcbSetSpace(
-        INIT_TCB_CAP_ADDRESS,
-        INIT_NULL_CAP_ADDRESS,
-        root_cnode_cap,
-        root_guard,
-        INIT_VSPACE_CAP_ADDRESS,
-        0
+        INIT_TCB_CAP_ADDRESS,                          # Z: TCB operated on
+        INIT_NULL_CAP_ADDRESS,                         # Z: fault endpoint
+        root_cnode_cap,                                # Z: root CNode of new CSpace
+        root_guard,                                    # Z: guard and guard size to set
+        INIT_VSPACE_CAP_ADDRESS,                       # Z: root of new VSpace
+        0                                              # Z: no effect
     ))
 
     # 2.1.6: Now we can create our new system Cnode. We will place it into
@@ -850,14 +1031,14 @@ def build_system(
     guard = kernel_config.cap_address_bits - root_cnode_bits - system_cnode_bits
     system_cap_address_mask = 1 << (kernel_config.cap_address_bits - 1)
     bootstrap_invocations.append(Sel4CnodeMint(
-        root_cnode_cap,
-        1,
-        root_cnode_bits,
-        INIT_CNODE_CAP_ADDRESS,
-        system_cnode_cap,
-        kernel_config.cap_address_bits,
-        SEL4_RIGHTS_ALL,
-        guard
+        root_cnode_cap,                                # Z: destination CNode
+        1,                                             # Z: destination index
+        root_cnode_bits,                               # Z: destination depth
+        INIT_CNODE_CAP_ADDRESS,                        # Z: source CNode
+        system_cnode_cap,                              # Z: source CSlot index
+        kernel_config.cap_address_bits,                # Z: source depth
+        SEL4_RIGHTS_ALL,                               # Z: rights inherited by minted cap
+        guard                                          # Z: badge
     ))
 
     # 2.2 At this point it is necessary to get the frames containing the
@@ -880,13 +1061,21 @@ def build_system(
     # page size. It would be good in the future to use super pages (when
     # it makes sense to - this would reduce memory usage, and the number of
     # invocations required to set up the address space
-    pages_required= invocation_table_size // kernel_config.minimum_page_size
+    #
+    # we don't specify mapped pages for the serialized invocations in the capdl
+    # because the invocations will be generated by the capdl loader
+    pages_required = invocation_table_size // kernel_config.minimum_page_size
     remaining_pages = pages_required
     invocation_table_allocations = []
     phys_addr = invocation_table_region.base
     base_page_cap = 0
     for pta in range(base_page_cap, base_page_cap + pages_required):
-        cap_address_names[system_cap_address_mask | pta] = "SmallPage: monitor invocation table"
+        cap_address_names[system_cap_address_mask | pta] = ("SmallPage: monitor invocation table Z:%s" % repr(pta))
+
+    # Z: the pages are mapped much later, straight before step 3
+    # Z: this is because we first need to alloc the page tables,
+    # Z: map them into a vspace
+    # Z: there is no loop there; the invocation repeat functionality is used
 
     cap_slot = base_page_cap
     for ut in (ut for ut in kernel_boot_info.untyped_objects if ut.is_device):
@@ -894,14 +1083,14 @@ def build_system(
         retype_page_count = min(ut_pages, remaining_pages)
         assert retype_page_count <= kernel_config.fan_out_limit
         bootstrap_invocations.append(Sel4UntypedRetype(
-                ut.cap,
-                SEL4_SMALL_PAGE_OBJECT,
-                0,
-                root_cnode_cap,
-                1,
-                1,
-                cap_slot,
-                retype_page_count
+            ut.cap,
+            SEL4_SMALL_PAGE_OBJECT,
+            0,
+            root_cnode_cap,
+            1,
+            1,
+            cap_slot,
+            retype_page_count
         ))
 
         remaining_pages -= retype_page_count
@@ -910,6 +1099,10 @@ def build_system(
         invocation_table_allocations.append((ut, phys_addr))
         if remaining_pages == 0:
             break
+
+    # Z: do we need to care about device untypeds at all, or is this
+    # Z: something that the capdl_loader will know how to deal with?
+    # Z: TODO: Ask Corey
 
     # 2.2.1: Now that physical pages have been allocated it is possible to setup
     # the virtual memory objects so that the pages can be mapped into virtual memory
@@ -925,32 +1118,53 @@ def build_system(
 
     for pta in range(base_page_table_cap, base_page_table_cap + page_tables_required):
         cap_address_names[system_cap_address_mask | pta] = "PageTable: monitor"
+    # Z: we don't need to do anything here
+    # Z: above, we used the KernelObjectAllocator to alloc the required page tables,
+    # Z: here we just remember the addresses, should we need them in the report.
+    # Z: the next UntypedRetype will create the page table objects
 
     assert page_tables_required <= kernel_config.fan_out_limit
     bootstrap_invocations.append(Sel4UntypedRetype(
-            page_table_allocation.untyped_cap_address,
-            SEL4_PAGE_TABLE_OBJECT,
-            0,
-            root_cnode_cap,
-            1,
-            1,
-            cap_slot,
-            page_tables_required
+        page_table_allocation.untyped_cap_address,
+        SEL4_PAGE_TABLE_OBJECT,
+        0,
+        root_cnode_cap,
+        1,
+        1,
+        cap_slot,
+        page_tables_required
     ))
     cap_slot += page_tables_required
 
+    # Z: VSpace: virtual memory address space, which can be shared between threads.
+    # Z: The representation of a VSpace is architecture-defined, on aarch64 we have
+    # Z: hardware-provided page tables, and we need the following  hardware VM objects:
+    # Z: seL4_PageGlobalDirectory, seL4_PageUpperDirectory, seL4_PageDirectory, seL4_PageTable
+
     # Now that the page tables are allocated they can be mapped into vspace
     vaddr = 0x8000_0000
-    invocation = Sel4PageTableMap(system_cap_address_mask | base_page_table_cap, INIT_VSPACE_CAP_ADDRESS, vaddr, SEL4_ARM_DEFAULT_VMATTRIBUTES)
+    invocation = Sel4PageTableMap(
+        system_cap_address_mask | base_page_table_cap,  # Z: cap to the page table operated on
+        INIT_VSPACE_CAP_ADDRESS,                       # Z: cap to VSpace (pagedir) to contain the mapping
+        vaddr,                                         # Z: virt address to map the page into
+        SEL4_ARM_DEFAULT_VMATTRIBUTES                  # Z: (set non/executable, enable parity check)
+    )
     invocation.repeat(page_tables_required, page_table=1, vaddr=SEL4_LARGE_PAGE_SIZE)
     bootstrap_invocations.append(invocation)
 
+    # Z: a pagedir can be used as a vspace - but mapping into the INIT_VSPACE? Is that a problem?
+
     # Finally, once the page tables are allocated the pages can be mapped
     vaddr = 0x8000_0000
-    invocation = Sel4PageMap(system_cap_address_mask | base_page_cap, INIT_VSPACE_CAP_ADDRESS, vaddr, SEL4_RIGHTS_READ, SEL4_ARM_DEFAULT_VMATTRIBUTES | SEL4_ARM_EXECUTE_NEVER)
+    invocation = Sel4PageMap(  # Z: TODO document this!
+        system_cap_address_mask | base_page_cap,
+        INIT_VSPACE_CAP_ADDRESS,
+        vaddr,
+        SEL4_RIGHTS_READ,
+        SEL4_ARM_DEFAULT_VMATTRIBUTES | SEL4_ARM_EXECUTE_NEVER
+    )
     invocation.repeat(pages_required, page=1, vaddr=kernel_config.minimum_page_size)
     bootstrap_invocations.append(invocation)
-
 
     # 3. Now we can start setting up the system based on the information
     # the user provided in the system xml.
@@ -970,7 +1184,6 @@ def build_system(
     #  Page table structs:
     #     as needed by protection domains based on mappings required
 
-
     phys_addr_next = reserved_base + invocation_table_size
     # Now we create additional MRs (and mappings) for the ELF files.
     regions: List[Region] = []
@@ -981,7 +1194,7 @@ def build_system(
         for segment in pd_elf_files[pd].segments:
             if not segment.loadable:
                 continue
-
+            print("Handling segment_idx %s - in segment %s" % (repr(seg_idx), repr(segment)))
             regions.append(Region(f"PD-ELF {pd.name}-{seg_idx}", phys_addr_next, segment.data))
 
             perms = ""
@@ -1023,7 +1236,7 @@ def build_system(
         if mr.phys_addr is not None:
             continue
         page_size_human = human_size_strict(mr.page_size)
-        page_names_by_size[mr.page_size] +=  [f"Page({page_size_human}): MR={mr.name} #{idx}" for idx in range(mr.page_count)]
+        page_names_by_size[mr.page_size] += [f"Page({page_size_human}): MR={mr.name} #{idx}" for idx in range(mr.page_count)]
 
     page_objects: Dict[int, List[KernelObject]] = {}
 
@@ -1046,7 +1259,7 @@ def build_system(
 
     # First we need to find all the requested pages and sorted them
     fixed_pages = []
-    for mr in all_mrs: #system.memory_regions:
+    for mr in all_mrs:  # system.memory_regions:
         if mr.phys_addr is None:
             continue
         phys_addr = mr.phys_addr
@@ -1088,7 +1301,7 @@ def build_system(
     # Page directory (level 2 table) is based on how many 1,024 MiB parts of
     # the address space is covered
     #
-    # Page table (level 3 table) is based on how many 2 MiB parts of the
+    # Page table (level 1 table) is based on how many 2 MiB parts of the
     # address space is covered (excluding any 2MiB regions covered by large
     # pages).
 
@@ -1103,7 +1316,7 @@ def build_system(
 
         # For each page, in each map determine we determine
         # which upper directory, directory and page table is resides
-        # in, and then page sure this is set
+        # in, and then make sure this is set
         vaddrs = [(ipc_buffer_vaddr, 0x1000)]
         for map in (pd.maps + pd_extra_maps[pd]):
             mr = all_mr_by_name[map.mr]
@@ -1121,7 +1334,7 @@ def build_system(
         ds += [(pd_idx, vaddr) for vaddr in sorted(directory_vaddrs)]
         pts += [(pd_idx, vaddr) for vaddr in sorted(page_table_vaddrs)]
 
-    pd_names = [pd.name for p in system.protection_domains]
+    pd_names = [pd.name for pd in system.protection_domains]
     vspace_names = [f"VSpace: PD={pd.name}" for pd in system.protection_domains]
 
     vspace_objects = init_system.allocate_objects(SEL4_VSPACE_OBJECT, vspace_names)
@@ -1142,6 +1355,7 @@ def build_system(
 
     cap_slot = init_system._cap_slot
 
+    # Z: Skipped for now, no IRQ support in CapDL prototype
     # Create all the necessary interrupt handler objects. These aren't
     # created through retype though!
     irq_cap_addresses: Dict[ProtectionDomain, List[int]] = {pd: [] for pd in system.protection_domains}
@@ -1162,6 +1376,7 @@ def build_system(
             cap_address_names[cap_address] = f"IRQ Handler: irq={sysirq.irq:d}"
             irq_cap_addresses[pd].append(cap_address)
 
+    # Z: capdl-loader should account for this
     # This has to be done prior to minting!
     # for vspace_obj in vspace_objects:
     #     system_invocations.append(Sel4AsidPoolAssign(INIT_ASID_POOL_CAP_ADDRESS, vspace_obj.cap_addr))
@@ -1177,7 +1392,7 @@ def build_system(
     for pd_idx, pd in enumerate(system.protection_domains):
         for mp in (pd.maps + pd_extra_maps[pd]):
             vaddr = mp.vaddr
-            mr = all_mr_by_name[mp.mr] #system.mr_by_name[mp.mr]
+            mr = all_mr_by_name[mp.mr]  # system.mr_by_name[mp.mr]
             rights = 0
             attrs = SEL4_ARM_PARITY_ENABLED
             if "r" in mp.perms:
@@ -1192,7 +1407,15 @@ def build_system(
             assert len(mr_pages[mr]) > 0
             assert_objects_adjacent(mr_pages[mr])
 
-            invocation = Sel4CnodeMint(system_cnode_cap, cap_slot, system_cnode_bits, root_cnode_cap, mr_pages[mr][0].cap_addr, kernel_config.cap_address_bits, rights, 0)
+            invocation = Sel4CnodeMint(
+                system_cnode_cap,
+                cap_slot,
+                system_cnode_bits,
+                root_cnode_cap,
+                mr_pages[mr][0].cap_addr,
+                kernel_config.cap_address_bits,
+                rights,
+                0)
             invocation.repeat(len(mr_pages[mr]), dest_index=1, src_obj=1)
             system_invocations.append(invocation)
 
@@ -1231,7 +1454,15 @@ def build_system(
             badged_irq_caps[pd].append(badged_cap_address)
             cap_slot += 1
 
-    invocation = Sel4CnodeMint(system_cnode_cap, cap_slot, system_cnode_bits, root_cnode_cap, fault_ep_endpoint_object.cap_addr, kernel_config.cap_address_bits, SEL4_RIGHTS_ALL, 1)
+    invocation = Sel4CnodeMint(
+        system_cnode_cap,
+        cap_slot,
+        system_cnode_bits,
+        root_cnode_cap,
+        fault_ep_endpoint_object.cap_addr,
+        kernel_config.cap_address_bits,
+        SEL4_RIGHTS_ALL,
+        1)
     invocation.repeat(len(system.protection_domains), dest_index=1, badge=1)
     system_invocations.append(invocation)
     badged_fault_ep = system_cap_address_mask | cap_slot
@@ -1239,7 +1470,7 @@ def build_system(
 
     final_cap_slot = cap_slot
 
-    ## Minting in the address space
+    # Minting in the address space
     for pd, notification_obj, cnode_obj in zip(system.protection_domains, notification_objects, cnode_objects):
         obj = pp_ep_endpoint_objects[pd] if pd.pp else notification_obj
         assert INPUT_CAP_IDX < PD_CAP_SIZE
@@ -1255,13 +1486,22 @@ def build_system(
                 0)
         )
 
-    ## Mint access to the vspace cap
+    # Mint access to the vspace cap
     assert VSPACE_CAP_IDX < PD_CAP_SIZE
-    invocation = Sel4CnodeMint(cnode_objects[0].cap_addr, VSPACE_CAP_IDX, PD_CAP_BITS, root_cnode_cap, vspace_objects[0].cap_addr, kernel_config.cap_address_bits, SEL4_RIGHTS_ALL, 0)
+    invocation = Sel4CnodeMint(
+        cnode_objects[0].cap_addr,
+        VSPACE_CAP_IDX,
+        PD_CAP_BITS,
+        root_cnode_cap,
+        vspace_objects[0].cap_addr,
+        kernel_config.cap_address_bits,
+        SEL4_RIGHTS_ALL,
+        0)
     invocation.repeat(len(system.protection_domains), cnode=1, src_obj=1)
     system_invocations.append(invocation)
 
-    ## Mint access to interrupt handlers in the PD Cspace
+    # Z: Skipped for now, no IRQ support in CDL
+    # Mint access to interrupt handlers in the PD Cspace
     for cnode_obj, pd in zip(cnode_objects, system.protection_domains):
         for sysirq, irq_cap_address in zip(pd.irqs, irq_cap_addresses[pd]):
             cap_idx = BASE_IRQ_CAP + sysirq.id_
@@ -1278,6 +1518,7 @@ def build_system(
                     0)
             )
 
+    # Z: Skipped for now, no channel support in CDL (assume channels empty)
     for cc in system.channels:
         pd_a = system.pd_by_name[cc.pd_a]
         pd_b = system.pd_by_name[cc.pd_b]
@@ -1301,7 +1542,7 @@ def build_system(
                 root_cnode_cap,
                 pd_b_notification_obj.cap_addr,
                 kernel_config.cap_address_bits,
-                SEL4_RIGHTS_ALL, # FIXME: Check rights
+                SEL4_RIGHTS_ALL,  # FIXME: Check rights
                 pd_a_badge)
         )
 
@@ -1317,7 +1558,7 @@ def build_system(
                 root_cnode_cap,
                 pd_a_notification_obj.cap_addr,
                 kernel_config.cap_address_bits,
-                SEL4_RIGHTS_ALL, # FIXME: Check rights
+                SEL4_RIGHTS_ALL,  # FIXME: Check rights
                 pd_b_badge)
         )
 
@@ -1336,7 +1577,7 @@ def build_system(
                     root_cnode_cap,
                     pd_b_endpoint_obj.cap_addr,
                     kernel_config.cap_address_bits,
-                    SEL4_RIGHTS_ALL, # FIXME: Check rights
+                    SEL4_RIGHTS_ALL,  # FIXME: Check rights
                     pd_a_badge)
             )
 
@@ -1354,19 +1595,18 @@ def build_system(
                     root_cnode_cap,
                     pd_a_endpoint_obj.cap_addr,
                     kernel_config.cap_address_bits,
-                    SEL4_RIGHTS_ALL, # FIXME: Check rights
+                    SEL4_RIGHTS_ALL,  # FIXME: Check rights
                     pd_b_badge)
             )
 
-
     # All minting is complete at this point
 
+    # Z: Skipped for now, no IRQ support in CapDL prototype
     # Associate badges
     # FIXME: This could use repeat
     for notification_obj, pd in zip(notification_objects, system.protection_domains):
         for irq_cap_address, badged_notification_cap_address in zip(irq_cap_addresses[pd], badged_irq_caps[pd]):
             system_invocations.append(Sel4IrqHandlerSetNotification(irq_cap_address, badged_notification_cap_address))
-
 
     # Initialise the VSpaces -- assign them all the the initial asid pool.
     for map_cls, descriptors, objects in [
@@ -1374,11 +1614,19 @@ def build_system(
         (Sel4PageDirectoryMap, ds, d_objects),
         (Sel4PageTableMap, pts, pt_objects),
     ]:
-        for ((pd_idx, vaddr), obj) in zip(descriptors, objects):
+
+        # Z: Here we need to maintain the mapping table. A vaddr
+        # Z: is a number that consists of multiple segments,
+        # Z: the first segment from the left determines the PGD,
+        # Z: the next segment the PUD, and so on, in order of
+        # Z: precedence. By the time we map a PD, the PUD in the vaddr
+        # Z: will have to have been mapped already.
+
+        for ((pd_idx, vaddr), ko) in zip(descriptors, objects):
             vspace_obj = vspace_objects[pd_idx]
             system_invocations.append(
                 map_cls(
-                    obj.cap_addr,
+                    ko.cap_addr,
                     vspace_obj.cap_addr,
                     vaddr,
                     SEL4_ARM_DEFAULT_VMATTRIBUTES
@@ -1388,7 +1636,12 @@ def build_system(
     # Now maps all the pages
     for page_cap_address, pd_idx, vaddr, rights, attrs, count, vaddr_incr in page_descriptors:
         vspace_obj = vspace_objects[pd_idx]
-        invocation = Sel4PageMap(page_cap_address, vspace_obj.cap_addr, vaddr, rights, attrs)
+        invocation = Sel4PageMap(
+            page_cap_address,
+            vspace_obj.cap_addr,
+            vaddr,
+            rights,
+            attrs)
         invocation.repeat(count, page=1, vaddr=vaddr_incr)
         system_invocations.append(invocation)
 
@@ -1408,7 +1661,13 @@ def build_system(
     # Initialise the TCBs
     #
     # set vspace / cspace (SetSpace)
-    invocation = Sel4TcbSetSpace(tcb_objects[0].cap_addr, badged_fault_ep, cnode_objects[0].cap_addr, kernel_config.cap_address_bits - PD_CAP_BITS, vspace_objects[0].cap_addr, 0)
+    invocation = Sel4TcbSetSpace(
+        tcb_objects[0].cap_addr,
+        badged_fault_ep,
+        cnode_objects[0].cap_addr,
+        kernel_config.cap_address_bits - PD_CAP_BITS,
+        vspace_objects[0].cap_addr,
+        0)
     invocation.repeat(len(system.protection_domains), tcb=1, fault_ep=1, cspace_root=1, vspace_root=1)
     system_invocations.append(invocation)
 
@@ -1423,7 +1682,7 @@ def build_system(
             Sel4TcbWriteRegisters(
                 tcb_obj.cap_addr,
                 False,
-                0, # no flags on ARM
+                0,  # no flags on ARM
                 Sel4Aarch64Regs(pc=pd_elf_files[pd].entry)
             )
         )
@@ -1446,7 +1705,6 @@ def build_system(
     for system_invocation in system_invocations:
         system_invocation_data += system_invocation._get_raw_invocation()
 
-
     for pd in system.protection_domains:
         # Could use pd.elf_file.write_symbol here to update variables if required.
         pd_elf_files[pd].write_symbol("sel4cp_name", pack("<16s", pd.name.encode("utf8")))
@@ -1468,19 +1726,21 @@ def build_system(
                 raise Exception(f"Unable to patch variable '{setvar.symbol}' in protection domain: '{pd.name}': variable not found.")
 
     return BuiltSystem(
-        number_of_system_caps = final_cap_slot, #init_system._cap_slot,
-        invocation_data_size = len(system_invocation_data),
-        bootstrap_invocations = bootstrap_invocations,
-        system_invocations = system_invocations,
-        kernel_boot_info = kernel_boot_info,
-        reserved_region = reserved_region,
-        fault_ep_cap_address = fault_ep_endpoint_object.cap_addr,
-        cap_lookup = cap_address_names,
-        tcb_caps = tcb_caps,
-        regions = regions,
-        kernel_objects = init_system._objects,
-        initial_task_phys_region = initial_task_phys_region,
-        initial_task_virt_region = initial_task_virt_region,
+        number_of_system_caps=final_cap_slot,  # init_system._cap_slot,
+        invocation_data_size=len(system_invocation_data),
+        bootstrap_invocations=bootstrap_invocations,
+        system_invocations=system_invocations,
+        kernel_boot_info=kernel_boot_info,
+        reserved_region=reserved_region,
+        fault_ep_cap_address=fault_ep_endpoint_object.cap_addr,
+        reply_cap_address=reply_object.cap_addr,
+        cap_lookup=cap_address_names,
+        tcb_caps=tcb_caps,
+        regions=regions,
+        kernel_objects=init_system._objects,
+        initial_task_phys_region=initial_task_phys_region,
+        initial_task_virt_region=initial_task_virt_region,
+        mr_pages=mr_pages,
     )
 
 
@@ -1509,6 +1769,7 @@ def main() -> int:
     parser.add_argument("system", type=Path)
     parser.add_argument("-o", "--output", type=Path, default=Path("loader.img"))
     parser.add_argument("-r", "--report", type=Path, default=Path("report.txt"))
+    parser.add_argument("-c", "--capdl", type=Path)
     parser.add_argument("--board", required=True, choices=available_boards)
     parser.add_argument("--config", required=True)
     parser.add_argument("--search-path", nargs='*', type=Path)
@@ -1555,18 +1816,18 @@ def main() -> int:
     # FIXME: The kernel config should be an output of the kernel
     # build step (or embedded into the kernel elf file in some manner
     kernel_config = KernelConfig(
-        word_size = 64,
-        minimum_page_size = kb(4),
-        paddr_user_device_top = (1 << 40),
-        kernel_frame_size = (1 << 12),
-        init_cnode_bits = 12,
+        word_size=64,
+        minimum_page_size=kb(4),
+        paddr_user_device_top=(1 << 40),
+        kernel_frame_size=(1 << 12),
+        init_cnode_bits=12,
         cap_address_bits=64,
         fan_out_limit=256
     )
 
     monitor_elf = ElfFile.from_path(monitor_elf_path)
     if len(monitor_elf.segments) > 1:
-        raise Exception("monitor ({monitor_elf_path}) has {len(monitor_elf.segments)} segments; must only have one")
+        raise Exception(f"monitor ({monitor_elf_path}) has {len(monitor_elf.segments)} segments; must only have one")
 
     invocation_table_size = kernel_config.minimum_page_size
     system_cnode_size = 2
@@ -1582,8 +1843,8 @@ def main() -> int:
             search_paths,
         )
         print(f"BUILT: {system_cnode_size=} {built_system.number_of_system_caps=} {invocation_table_size=} {built_system.invocation_data_size=}")
-        if (built_system.number_of_system_caps <= system_cnode_size and
-            built_system.invocation_data_size <= invocation_table_size):
+        if (built_system.number_of_system_caps <= system_cnode_size
+                and built_system.invocation_data_size <= invocation_table_size):
             break
 
         # Recalculate the sizes for the next iteration
@@ -1592,6 +1853,11 @@ def main() -> int:
 
         invocation_table_size = max(invocation_table_size, new_invocation_table_size)
         system_cnode_size = max(system_cnode_size, new_system_cnode_size)
+
+    if args.capdl:
+        cdl_spec = generate_capdl(system_description, search_paths, kernel_config, built_system.mr_pages)
+        with args.capdl.open("w") as f:
+            f.write('%s' % cdl_spec)
 
     # At this point we just need to patch the files (in memory) and write out the final image.
 
@@ -1607,9 +1873,9 @@ def main() -> int:
     if len(built_system.kernel_boot_info.untyped_objects) > max_untyped_objects:
         raise Exception(f"Too many untyped objects: monitor ({monitor_elf_path}) supports {max_untyped_objects:,d} regions. System has {len(built_system.kernel_boot_info.untyped_objects):,d} objects.")
     untyped_info_header = MONITOR_CONFIG.untyped_info_header_struct.pack(
-            built_system.kernel_boot_info.untyped_objects[0].cap,
-            built_system.kernel_boot_info.untyped_objects[-1].cap + 1
-        )
+        built_system.kernel_boot_info.untyped_objects[0].cap,
+        built_system.kernel_boot_info.untyped_objects[-1].cap + 1
+    )
     untyped_info_object_data = []
     for idx, ut in enumerate(built_system.kernel_boot_info.untyped_objects):
         object_data = MONITOR_CONFIG.untyped_info_object_struct.pack(ut.base, ut.size_bits, ut.is_device)
@@ -1650,9 +1916,8 @@ def main() -> int:
     names_array = bytearray([0] * (64 * 16))
     for idx, pd in enumerate(system_description.protection_domains, 1):
         nm = pd.name.encode("utf8")[:15]
-        names_array[idx * 16:idx * 16+len(nm)] = nm
+        names_array[idx * 16:idx * 16 + len(nm)] = nm
     monitor_elf.write_symbol("pd_names", names_array)
-
 
     # B: The loader
 
