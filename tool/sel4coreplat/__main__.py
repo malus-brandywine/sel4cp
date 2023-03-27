@@ -860,7 +860,6 @@ def build_system(
     initial_task_phys_regions_elf = phys_mem_regions_from_elf(initialiser_elf, kernel_config.minimum_page_size)
     # initial_task_size = sum([r.size for r in initial_task_phys_regions_elf])
     initial_task_size = initial_task_phys_regions_elf[-1].end - initial_task_phys_regions_elf[0].base
-    print(f"Initial task size: 0x{initial_task_size:x}")
     # initial_task_size = phys_mem_regions_from_elf(initialiser_elf, kernel_config.minimum_page_size).size
 
     # Get the elf files for each pd:
@@ -898,7 +897,6 @@ def build_system(
     initial_task_phys_region = MemoryRegion(initial_task_phys_base, initial_task_phys_base + initial_task_size)
     initial_task_virt_regions_elf = virt_mem_regions_from_elf(initialiser_elf, kernel_config.minimum_page_size)
     initial_task_virt_region = MemoryRegion(initial_task_virt_regions_elf[0].base, initial_task_virt_regions_elf[-1].end)
-    print(f"initial_task_virt_region: {initial_task_virt_region}")
 
     reserved_region = MemoryRegion(reserved_base, reserved_base + reserved_size)
 
@@ -1775,8 +1773,6 @@ def build_system(
             except KeyError:
                 raise Exception(f"Unable to patch variable '{setvar.symbol}' in protection domain: '{pd.name}': variable not found.")
 
-    print(f"==== built system initial_task_phys_region: {initial_task_phys_region}")
-    print(f"==== built system initial_task_virt_region: {initial_task_virt_region}")
     return BuiltSystem(
         number_of_system_caps=final_cap_slot,  # init_system._cap_slot,
         invocation_data_size=len(system_invocation_data),
@@ -1898,10 +1894,8 @@ def main() -> int:
         # @ivanv: This process is bad, and needs to be revisited. I generally don't like how there are multiple
         # tools to be invoked. Also the search path required is hard-coded...
         # @ivanv: check that these commands are successful
-        print("here!!!")
         system(f"cp {monitor_elf_path} {args.search_path[1]}")
         system(f"{capdl_tool_path} --object-sizes={object_sizes_path} --json=spec.json {CAPDL_SPEC_PATH}")
-        print(f"d: {args.search_path[1]}")
         system(f"{capdl_add_spec_to_initialiser_path} -e {initialiser_elf_path} -f spec.json -d {args.search_path[1]} -o {INITIALISER_ELF_PATH}")
 
     initialiser_elf = ElfFile.from_path(Path(INITIALISER_ELF_PATH))

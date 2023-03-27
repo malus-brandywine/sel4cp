@@ -127,11 +127,6 @@ class Loader:
                 ))
 
 
-        print("==== kernel regions ===")
-        for region in self._regions:
-            print(f"region at: 0x{region[0]:x} with len: 0x{len(region[1]):x}")
-        print("==== kernel regions  END ===")
-
         assert kernel_first_paddr is not None
 
         # Note: This could be extended to support multi-segment ELF files
@@ -139,7 +134,6 @@ class Loader:
         # it adds significant complexity, and the calling functions enforce
         # only single-segment ELF files, so we keep things simple here.
         for segment in initial_task_elf.segments:
-            print(segment)
             assert segment.loadable
 
         # inittask_first_vaddr = initial_task_elf.segments[0].virt_addr
@@ -230,13 +224,9 @@ class Loader:
         assert inittask_last_vaddr is not None
         assert inittask_p_v_offset is not None
         ui_p_reg_end = inittask_last_vaddr - inittask_p_v_offset
-        print(f"    ui_p_reg_start: 0x{ui_p_reg_start:x}")
-        print(f"    ui_p_reg_end: 0x{ui_p_reg_end:x}")
         assert(ui_p_reg_end > ui_p_reg_start)
         v_entry = initial_task_elf.entry
 
-        for region in self._regions:
-            print(f"region at: 0x{region[0]:x} with len: 0x{len(region[1]):x}")
         _check_non_overlapping(self._regions)
 
         assert (ui_p_reg_end - ui_p_reg_start == inittask_last_vaddr - inittask_first_vaddr)
@@ -245,13 +235,6 @@ class Loader:
         flags = 0
 
         # @ivanv: the ideal solution is to REMOVE the extra_device stuff
-        print("Initial task info: ")
-        print(f"    inittask_first_vaddr: 0x{inittask_first_vaddr:x}")
-        print(f"    inittask_last_vaddr: 0x{inittask_last_vaddr:x}")
-        print(f"    ui_p_reg_start: 0x{ui_p_reg_start:x}")
-        print(f"    ui_p_reg_end: 0x{ui_p_reg_end:x}")
-        print(f"    pv_offset: 0x{pv_offset:x}")
-        print(f"    v_entry: 0x{v_entry:x}")
         self._header = (
             self._magic,
             flags,

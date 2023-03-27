@@ -308,7 +308,6 @@ class ElfFile:
             shents = []
             symtab_shent: Optional[ElfSectionHeader] = None
             shstrtab_shent: Optional[int] = None
-            print("before ")
             for idx in range(hdr.shnum):
                 shent_raw = f.read(hdr.shentsize)
                 shent = ElfSectionHeader(**dict(zip(sh_fields, sh_fmt.unpack_from(shent_raw))))
