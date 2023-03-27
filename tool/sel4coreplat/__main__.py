@@ -40,13 +40,16 @@ from argparse import ArgumentParser
 from pathlib import Path
 from dataclasses import dataclass
 from struct import pack, Struct
-from os import environ, system
+from os import environ, system, getcwd
 from math import log2, ceil
 from sys import argv, executable, stderr
 
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-sys.path.append("/home/ivanv/ts/ncsc_sel4cp/sel4cp/initialiser/capdl/python-capdl-tool")
+# @ivanv: total hack since I don't have time to deal with Python's annoying
+# module system
+cwd = getcwd()
+sys.path.append(cwd + "/../../../initialiser/capdl/python-capdl-tool")
 import capdl
 from capdl.Object import *
 from sel4coreplat.cdlutil import register_aarch64_sizes, cdlsafe, UpperDir, LowerDir, PTable, PFrame, alignment_of_sort
