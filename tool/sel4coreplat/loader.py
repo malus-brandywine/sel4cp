@@ -161,9 +161,11 @@ class Loader:
         #     ))
         #     offset += len(segment.data)
 
+        offset = 0x40000000 + 0x200000
+
         inittask_first_vaddr: Optional[int] = None
         inittask_last_vaddr: Optional[int] = None
-        inittask_first_paddr: Optional[int] = initial_task_elf.segments[0].phys_addr + 0x200000
+        inittask_first_paddr: Optional[int] = initial_task_elf.segments[0].phys_addr + offset
         inittask_p_v_offset: Optional[int] = None
 
         prev_segment_paddr = 0
@@ -193,13 +195,13 @@ class Loader:
                     inittask_last_vaddr = round_up(segment.virt_addr + segment.mem_size, kb(4))
 
                 if inittask_p_v_offset is None:
-                    inittask_p_v_offset = segment.virt_addr - (segment.phys_addr + 0x200000)
+                    inittask_p_v_offset = segment.virt_addr - (segment.phys_addr + offset)
                 else:
-                    if inittask_p_v_offset != segment.virt_addr - (segment.phys_addr + 0x200000):
+                    if inittask_p_v_offset != segment.virt_addr - (segment.phys_addr + offset):
                         raise Exception("Kernel does not have constistent phys to virt offset")
 
                 self._regions.append((
-                    segment.phys_addr + 0x200000,
+                    segment.phys_addr + offset,
                     segment.data
                 ))
 
