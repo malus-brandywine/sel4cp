@@ -58,23 +58,34 @@ SUPPORTED_BOARDS = [
     #         "ethernet": Path("example/tqma8xqp1gb/ethernet")
     #     }
     # ),
+    # BoardInfo(
+    #     name="zcu102",
+    #     gcc_cpu="cortex-a53",
+    #     loader_link_address=0x40000000,
+    #     kernel_options = {
+    #         "KernelPlatform": "zynqmp",
+    #         "KernelARMPlatform": "zcu102",
+    #         "KernelArmExportPCNTUser": True,
+    #     },
+    #     examples = {
+    #         "hello": Path("example/zcu102/hello")
+    #     }
+    # )
     BoardInfo(
-        name="zcu102",
+        name="qemu_arm_virt",
         gcc_cpu="cortex-a53",
-        loader_link_address=0x40000000,
+        loader_link_address=0x70000000,
         kernel_options = {
-            "KernelPlatform": "zynqmp",
-            "KernelARMPlatform": "zcu102",
-            "KernelArmExportPCNTUser": True,
+            "KernelPlatform": "qemu-arm-virt",
         },
         examples = {
-            "hello": Path("example/zcu102/hello")
+            "hello": Path("example/qemu_arm_virt/hello")
         }
-    )
+    ),
 ]
 
 SUPPORTED_CONFIGS = (
-    # Get error when building Rust stuff in release mode, it's complaining
+    # @ivanv: Get error when building Rust stuff in release mode, it's complaining
     # about not finding "sel4::debug_put_char" which makes sense.
     # ConfigInfo(
     #     name="release",
