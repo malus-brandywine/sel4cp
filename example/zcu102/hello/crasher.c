@@ -9,7 +9,9 @@
 void
 init(void)
 {
-    sel4cp_dbg_puts("hello, world, capdl test!\n");
+    sel4cp_dbg_puts("Crashing PD starting!\n");
+    int *x = 0;
+    *x = 123;
 }
 
 void

@@ -58,7 +58,7 @@ def _check_non_overlapping(regions: List[Tuple[int, bytes]]) -> None:
         # Check that this does not overlap any checked regions
         for b, e in checked:
             if not (end <= b or base >= e):
-                raise Exception(f"Overlapping: {base:x}--{end:x} overlaps {b:x} -- {e:x}")
+                raise Exception(f"Overlapping: 0x{base:x}--0x{end:x} overlaps 0x{b:x}--0x{e:x}")
 
         checked.append((base, end))
 
@@ -69,7 +69,6 @@ class Loader:
         kernel_elf: ElfFile,
         initial_task_elf: ElfFile,
         initial_task_phys_base: Optional[int],
-        reserved_region: MemoryRegion,
         regions: List[Tuple[int, bytes]]
     ) -> None:
         """
@@ -128,6 +127,10 @@ class Loader:
                 ))
 
 
+        print("==== kernel regions ===")
+        for region in self._regions:
+            print(f"region at: 0x{region[0]:x} with len: 0x{len(region[1]):x}")
+        print("==== kernel regions  END ===")
 
         assert kernel_first_paddr is not None
 
@@ -135,21 +138,76 @@ class Loader:
         # (and indeed initial did support multi-segment ELF files). However
         # it adds significant complexity, and the calling functions enforce
         # only single-segment ELF files, so we keep things simple here.
-        assert len(initial_task_elf.segments) == 1
-        segment = initial_task_elf.segments[0]
-        assert segment.loadable
+        for segment in initial_task_elf.segments:
+            print(segment)
+            assert segment.loadable
 
-        inittask_first_vaddr = segment.virt_addr
-        inittask_last_vaddr = round_up(segment.virt_addr + segment.mem_size, kb(4))
+        # inittask_first_vaddr = initial_task_elf.segments[0].virt_addr
+        # inittask_last_vaddr = 0
+        # for segment in initial_task_elf.segments:
+        #     inittask_last_vaddr += round_up(segment.virt_addr + segment.mem_size, kb(4))
 
-        inittask_first_paddr = segment.phys_addr if initial_task_phys_base is None else initial_task_phys_base
-        inittask_p_v_offset = inittask_first_vaddr - inittask_first_paddr
+        # print(f"inittask_last_vaddr: 0x{inittask_last_vaddr:x}")
+        # print(f"=========== initial_task_phys_base: 0x{initial_task_phys_base:x}")
+        # assert initial_task_phys_base is not None
+        # # initial_task_phys_base += 640000
+        # inittask_first_paddr = segment[0].phys_addr if initial_task_phys_base is None else initial_task_phys_base
+        # print(f"=========== inittask_first_paddr: 0x{inittask_first_paddr:x}")
+        # print(f"=========== inittask_first_vaddr: 0x{inittask_first_vaddr:x}")
+        # inittask_p_v_offset = inittask_first_vaddr - inittask_first_paddr
 
         # NOTE: For now we include any zeroes. We could optimize in the future
-        self._regions.append((
-            inittask_first_paddr,
-            segment.data
-        ))
+        # @ivanv: need to check that this phys_addr makes sense
+        # offset = 0
+        # for segment in initial_task_elf.segments:
+        #     print(f"segmnet.phys_addr: 0x{segment.phys_addr:x}")
+        #     self._regions.append((
+        #         inittask_first_paddr + offset,
+        #         segment.data
+        #     ))
+        #     offset += len(segment.data)
+
+        inittask_first_vaddr: Optional[int] = None
+        inittask_last_vaddr: Optional[int] = None
+        inittask_first_paddr: Optional[int] = initial_task_elf.segments[0].phys_addr + 0x200000
+        inittask_p_v_offset: Optional[int] = None
+
+        prev_segment_paddr = 0
+
+        # The current initial task ELF phys addr is as 0x200000.
+        # The ideal init paddr start is: 0x243000.
+        # ELF segments:
+        # 1. 0x200000 - 0x2997d8
+        # 2. 0x29a7d8 - 0x2aac08
+        # 3. 0x2aadd4 - 0x2bbaf0
+
+        # relative_offsets = []
+        # for i, segment in enumerate(initial_task_elf.segments):
+        #     if i == 0:
+        #         relative_offsets.append(0)
+        #     else:
+        #         relative_offsets.append(initial_task_elef.relative_offsets[i-1])
+
+        for i, segment in enumerate(initial_task_elf.segments):
+            if segment.loadable:
+                # NOTE: For now we include any zeroes. We could optimize in the future
+
+                if inittask_first_vaddr is None or segment.virt_addr < inittask_first_vaddr:
+                    inittask_first_vaddr = segment.virt_addr
+
+                if inittask_last_vaddr is None or segment.virt_addr + segment.mem_size > inittask_last_vaddr:
+                    inittask_last_vaddr = round_up(segment.virt_addr + segment.mem_size, kb(4))
+
+                if inittask_p_v_offset is None:
+                    inittask_p_v_offset = segment.virt_addr - (segment.phys_addr + 0x200000)
+                else:
+                    if inittask_p_v_offset != segment.virt_addr - (segment.phys_addr + 0x200000):
+                        raise Exception("Kernel does not have constistent phys to virt offset")
+
+                self._regions.append((
+                    segment.phys_addr + 0x200000,
+                    segment.data
+                ))
 
         # Determine the pagetable variables
         assert kernel_first_vaddr is not None
@@ -172,19 +230,28 @@ class Loader:
         assert inittask_last_vaddr is not None
         assert inittask_p_v_offset is not None
         ui_p_reg_end = inittask_last_vaddr - inittask_p_v_offset
+        print(f"    ui_p_reg_start: 0x{ui_p_reg_start:x}")
+        print(f"    ui_p_reg_end: 0x{ui_p_reg_end:x}")
         assert(ui_p_reg_end > ui_p_reg_start)
         v_entry = initial_task_elf.entry
 
-        extra_device_addr_p = reserved_region.base
-        extra_device_size = reserved_region.size
-
-        self._regions += regions
-
+        for region in self._regions:
+            print(f"region at: 0x{region[0]:x} with len: 0x{len(region[1]):x}")
         _check_non_overlapping(self._regions)
+
+        assert (ui_p_reg_end - ui_p_reg_start == inittask_last_vaddr - inittask_first_vaddr)
 
         # FIXME: Should be a way to determine if seL4 needs hypervisor mode or not
         flags = 0
 
+        # @ivanv: the ideal solution is to REMOVE the extra_device stuff
+        print("Initial task info: ")
+        print(f"    inittask_first_vaddr: 0x{inittask_first_vaddr:x}")
+        print(f"    inittask_last_vaddr: 0x{inittask_last_vaddr:x}")
+        print(f"    ui_p_reg_start: 0x{ui_p_reg_start:x}")
+        print(f"    ui_p_reg_end: 0x{ui_p_reg_end:x}")
+        print(f"    pv_offset: 0x{pv_offset:x}")
+        print(f"    v_entry: 0x{v_entry:x}")
         self._header = (
             self._magic,
             flags,
@@ -193,8 +260,8 @@ class Loader:
             ui_p_reg_end,
             pv_offset,
             v_entry,
-            extra_device_addr_p,
-            extra_device_size,
+            0,
+            0,
             len(self._regions)
         )
 

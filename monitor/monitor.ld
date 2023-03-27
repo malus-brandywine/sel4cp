@@ -5,12 +5,13 @@
  */
 PHDRS
 {
-    all PT_LOAD AT (0x08a000000);
+    text PT_LOAD;
+    data PT_LOAD;
 }
 
 SECTIONS
 {
-    . = 0x08a000000;
+    . = 0x200000;
 
     .text :
     {
@@ -19,14 +20,26 @@ SECTIONS
         *(.text*)
         *(.rodata)
         _text_end = .;
-    } :all
+    } :text
+
+    . = ALIGN(0x1000);
+
+    /* For some reason the ABI puts init array
+     * into writable memory, so we have to follow suit */
+    .init_array :
+    {
+        PROVIDE(__init_array_start = .);
+        KEEP (*(SORT(.init_array.*)))
+        KEEP (*(.init_array*))
+        PROVIDE(__init_array_end = .);
+    } :data
 
     .data :
     {
         _data = .;
         *(.data)
         _data_end = .;
-    } :all
+    } :data
 
     .bss :
     {
@@ -35,5 +48,10 @@ SECTIONS
         *(COMMON)
         . = ALIGN(4);
         _bss_end = .;
-    } :all
+    } :data
+
+    . = ALIGN(0x1000);
+    .ipc_buffer (NOLOAD): {
+        __sel4_ipc_buffer_obj = .;
+    }
 }

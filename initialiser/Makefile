@@ -2,13 +2,15 @@ ifeq ($(strip $(BUILD_DIR)),)
 $(error BUILD_DIR must be specified)
 endif
 
-ifeq ($(strip $(CAPDL_SPEC)),)
-$(error CAPDL_SPEC must be specified)
+# ifeq ($(strip $(CAPDL_SPEC)),)
+# $(error CAPDL_SPEC must be specified)
+# endif
+
+ifeq ($(strip $(KERNEL_INSTALL_DIR)),)
+$(error KERNEL_INSTALL_DIR must be specified)
 endif
 
 GCC_TOOLCHAIN := aarch64-none-elf-
-
-kernel_install_dir := $(BUILD_DIR)/zcu102/debug/sel4/install
 
 ### Common Rust definitions
 
@@ -24,7 +26,7 @@ common_env := \
 
 cross_env := \
 	$(common_env) \
-	SEL4_PREFIX=$(abspath $(kernel_install_dir)) \
+	SEL4_PREFIX=$(abspath $(KERNEL_INSTALL_DIR)) \
 
 # @ivanv: removed "--release" from common options
 CARGO_OPTIONS := \
@@ -42,7 +44,7 @@ CARGO_CROSS_OPTIONS := \
 ### CapDL tools
 
 capdl_source_dir := capdl
-capdl_tool := $(capdl_source_dir)/capDL-tool/parse-capDL
+capdl_tool := $(BUILD_DIR)/capDL-tool/parse-capDL
 capdl_tool_intermediate := $(BUILD_DIR)/capdl/capdl_tool.intermediate
 stack_root := $(BUILD_DIR)/capdl/stack-root # outlive docker container
 
@@ -51,6 +53,7 @@ $(capdl_tool): $(capdl_tool_intermediate)
 .INTERMDIATE: $(capdl_tool_intermediate)
 $(capdl_tool_intermediate):
 	$(MAKE) -C $(capdl_source_dir)/capDL-tool STACK_ROOT=$(abspath $(stack_root))
+	mv $(capdl_source_dir)/capDL-tool/parse-capDL $(BUILD_DIR)/parse-capDL
 
 capdl_loader_crate := capdl-loader-expecting-serialized-spec
 capdl_loader := $(BUILD_DIR)/$(capdl_loader_crate).elf
@@ -81,73 +84,58 @@ $(capdl_add_spec_to_loader_intermediate):
 
 ### Demo
 
-prebuilt_dir := prebuilt
-fill_dir := $(prebuilt_dir)
-spec_json := $(BUILD_DIR)/spec.json
+# prebuilt_dir := prebuilt
+# fill_dir := $(prebuilt_dir)
+# spec_json := $(BUILD_DIR)/spec.json
 object_sizes := $(BUILD_DIR)/object-sizes.yaml
 
 $(object_sizes):
 	$(GCC_TOOLCHAIN)gcc -E -P - \
-		-I $(kernel_install_dir)/libsel4/include \
+		-I $(KERNEL_INSTALL_DIR)/libsel4/include \
 		< $(capdl_source_dir)/object_sizes/object_sizes.yaml \
 		> $@
 
-$(spec_json): $(CAPDL_SPEC) $(capdl_tool) $(object_sizes)
-	$(capdl_tool) --object-sizes=$(object_sizes) --json=$@ $(CAPDL_SPEC)
+# $(spec_json): $(CAPDL_SPEC) $(capdl_tool) $(object_sizes)
+# 	$(capdl_tool) --object-sizes=$(object_sizes) --json=$@ $(CAPDL_SPEC)
 
-ifeq ($(SMALL),1)
+all: $(object_sizes) $(capdl_tool) $(capdl_loader_intermediate) $(capdl_add_spec_to_loader)
 
-app_crate := capdl-loader-with-embedded-spec
-app := $(BUILD_DIR)/$(app_crate).elf
-app_intermediate := $(BUILD_DIR)/app.intermediate
+# ifeq ($(SMALL),1)
 
-$(app): $(app_intermediate)
+# app_crate := capdl-loader-with-embedded-spec
+# app := $(BUILD_DIR)/initialiser.elf
+# app_intermediate := $(BUILD_DIR)/app.intermediate
 
-.INTERMDIATE: $(app_intermediate)
-$(app_intermediate): $(spec_json) $(fill_dir)
-	$(cross_env) \
-    	CAPDL_SPEC_FILE=$(abspath $(spec_json)) \
-    	CAPDL_FILL_DIR=$(abspath $(fill_dir)) \
-		cargo build \
-			$(CARGO_CROSS_OPTIONS) \
-			-p $(app_crate) \
-			--target $(rust_sel4_target)
+# $(app): $(app_intermediate)
 
-else
+# .INTERMDIATE: $(app_intermediate)
+# $(app_intermediate): $(spec_json) $(fill_dir)
+# 	$(cross_env) \
+#     	CAPDL_SPEC_FILE=$(abspath $(spec_json)) \
+#     	CAPDL_FILL_DIR=$(abspath $(fill_dir)) \
+# 		cargo build \
+# 			$(CARGO_CROSS_OPTIONS) \
+# 			-p $(app_crate) \
+# 			--target $(rust_sel4_target)
+# 		mv $(BUILD_DIR)/$(app_crate).elf $(app)
 
-app := $(BUILD_DIR)/app.elf
-app_intermediate := $(BUILD_DIR)/app.intermediate
+# all: $(app_intermediate)
 
-$(app): $(app_intermediate)
+# else
 
-.INTERMDIATE: $(app_intermediate)
-$(app_intermediate): $(spec_json) $(capdl_loader) $(capdl_add_spec_to_loader)
-	$(capdl_add_spec_to_loader) \
-		-e $(capdl_loader) \
-		-f $(spec_json) \
-		-d $(fill_dir) \
-		-o $(app)
+# app := $(BUILD_DIR)/app.elf
+# app_intermediate := $(BUILD_DIR)/app.intermediate
 
-endif
+# $(app): $(app_intermediate)
 
-loader_crate := loader
-loader := $(BUILD_DIR)/$(loader_crate)
-loader_intermediate := $(BUILD_DIR)/loader.intermediate
-loader_config := loader-config.json
+# .INTERMDIATE: $(app_intermediate)
+# $(app_intermediate): $(spec_json) $(capdl_loader) $(capdl_add_spec_to_loader)
+# 	$(capdl_add_spec_to_loader) \
+# 		-e $(capdl_loader) \
+# 		-f $(spec_json) \
+# 		-d $(fill_dir) \
+# 		-o $(app)
 
-$(loader): $(loader_intermediate)
+# all: $(app_intermediate)
 
-.INTERMDIATE: $(loader_intermediate)
-$(loader_intermediate): $(app)
-	$(cross_env) \
-	CC=$(cross_compiler_prefix)gcc \
-	SEL4_APP=$(abspath $(app)) \
-	SEL4_LOADER_CONFIG=$(abspath $(loader_config)) \
-		cargo build \
-			$(CARGO_CROSS_OPTIONS) \
-			-p $(loader_crate) \
-			--target $(rust_bare_metal_target)
-
-.PHONY: run
-run: $(loader)
-	echo "test"
+# endif

@@ -8,4 +8,10 @@
     <protection_domain name="hello" priority="254">
         <program_image path="hello.elf" />
     </protection_domain>
+    <protection_domain name="goodbye" priority="254">
+        <program_image path="goodbye.elf" />
+    </protection_domain>
+    <protection_domain name="crasher" priority="254">
+        <program_image path="crasher.elf" />
+    </protection_domain>
 </system>

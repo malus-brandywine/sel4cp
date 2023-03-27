@@ -10,7 +10,7 @@ than in make.
 
 """
 from argparse import ArgumentParser
-from os import popen, system
+from os import popen, system, getcwd
 from shutil import copy
 from pathlib import Path
 from dataclasses import dataclass
@@ -45,19 +45,19 @@ class ConfigInfo:
     kernel_options: KERNEL_CONFIG_TYPE
 
 
-SUPPORTED_BOARDS = (
-    BoardInfo(
-        name="tqma8xqp1gb",
-        gcc_cpu="cortex-a35",
-        loader_link_address=0x80280000,
-        kernel_options = {
-            "KernelPlatform": "tqma8xqp1gb",
-            "KernelArmExportPCNTUser": True,
-        },
-        examples = {
-            "ethernet": Path("example/tqma8xqp1gb/ethernet")
-        }
-    ),
+SUPPORTED_BOARDS = [
+    # BoardInfo(
+    #     name="tqma8xqp1gb",
+    #     gcc_cpu="cortex-a35",
+    #     loader_link_address=0x80280000,
+    #     kernel_options = {
+    #         "KernelPlatform": "tqma8xqp1gb",
+    #         "KernelArmExportPCNTUser": True,
+    #     },
+    #     examples = {
+    #         "ethernet": Path("example/tqma8xqp1gb/ethernet")
+    #     }
+    # ),
     BoardInfo(
         name="zcu102",
         gcc_cpu="cortex-a53",
@@ -71,14 +71,16 @@ SUPPORTED_BOARDS = (
             "hello": Path("example/zcu102/hello")
         }
     )
-)
+]
 
 SUPPORTED_CONFIGS = (
-    ConfigInfo(
-        name="release",
-        debug=False,
-        kernel_options = {},
-    ),
+    # Get error when building Rust stuff in release mode, it's complaining
+    # about not finding "sel4::debug_put_char" which makes sense.
+    # ConfigInfo(
+    #     name="release",
+    #     debug=False,
+    #     kernel_options = {},
+    # ),
     ConfigInfo(
         name="debug",
         debug=True,
@@ -229,7 +231,7 @@ def build_elf_component(
     build_dir.mkdir(exist_ok=True, parents=True)
     defines_str = " ".join(f"{k}={v}" for k, v in defines)
     r = system(
-        f"BOARD={board.name} BUILD_DIR={build_dir.absolute()} GCC_CPU={board.gcc_cpu} SEL4_SDK={sel4_dir.absolute()} {defines_str} make  -C {component_name}"
+        f"BOARD={board.name} BUILD_DIR={build_dir.absolute()} GCC_CPU={board.gcc_cpu} SEL4_SDK={sel4_dir.absolute()} {defines_str} make  -C {component_name} all"
     )
     if r != 0:
         raise Exception(
@@ -243,6 +245,52 @@ def build_elf_component(
     copy(elf, dest)
     # Make output read-only
     dest.chmod(0o444)
+
+
+def build_capdl_component(
+    component_name: str,
+    root_dir: Path,
+    build_dir: Path,
+    board: BoardInfo,
+    config: ConfigInfo,
+    defines: List[Tuple[str, str]]
+) -> None:
+    """Build a specific ELF component.
+
+    Right now this is either the loader or the monitor
+    """
+    sel4_dir = root_dir / "board" / board.name / config.name
+    build_dir = build_dir / board.name / config.name / component_name
+    build_dir.mkdir(exist_ok=True, parents=True)
+    defines_str = " ".join(f"{k}={v}" for k, v in defines)
+    r = system(
+        f"BOARD={board.name} BUILD_DIR={build_dir.absolute()} GCC_CPU={board.gcc_cpu} SEL4_SDK={sel4_dir.absolute()} {defines_str} make  -C {component_name} all"
+    )
+    if r != 0:
+        raise Exception(
+            f"Error building: {component_name} for board: {board.name} config: {config.name}"
+        )
+    elf = build_dir / f"capdl-loader-expecting-serialized-spec.elf"
+    dest = root_dir / "board" / board.name / config.name / "elf" / f"initialiser.elf"
+    dest.unlink(missing_ok=True)
+    copy(elf, dest)
+    # Make output read-only
+    dest.chmod(0o444)
+
+    dest = root_dir / "board" / board.name / config.name / "elf" / "capdl-add-spec-to-loader"
+    dest.unlink(missing_ok=True)
+    copy(build_dir / "capdl-add-spec-to-loader", dest)
+    dest.chmod(0o555)
+
+    dest = root_dir / "board" / board.name / config.name / "object-sizes.yaml"
+    dest.unlink(missing_ok=True)
+    copy(build_dir / "object-sizes.yaml", dest)
+    dest.chmod(0o444)
+
+    dest = root_dir / "parse-capDL"
+    dest.unlink(missing_ok=True)
+    copy(build_dir / "parse-capDL", dest)
+    dest.chmod(0o555)
 
 
 def build_doc(root_dir):
@@ -360,7 +408,11 @@ def main() -> None:
             ]
             build_elf_component("loader", root_dir, build_dir, board, config, loader_defines)
             build_elf_component("monitor", root_dir, build_dir, board, config, [])
-            # build_elf_component("capdl", root_dir, build_dir, board, config, [])
+            # @ivanv: should get it working without having to get root path
+            initialiser_defines = [
+                ("KERNEL_INSTALL_DIR", getcwd() / build_dir / board.name / config.name / "sel4/install")
+            ]
+            build_capdl_component("initialiser", root_dir, build_dir, board, config, initialiser_defines)
             build_lib_component("libsel4cp", root_dir, build_dir, board, config)
         # Setup the examples
         for example, example_path in board.examples.items():

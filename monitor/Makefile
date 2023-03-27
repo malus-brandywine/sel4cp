@@ -15,7 +15,7 @@ TOOLCHAIN := aarch64-none-elf-
 CFLAGS := -std=gnu11 -g3 -O3 -nostdlib -ffreestanding -mcpu=$(GCC_CPU) -Wall -Wno-maybe-uninitialized -Werror -I$(SEL4_SDK)/include
 
 PROGS := monitor.elf
-OBJECTS := main.o crt0.o debug.o util.o
+OBJECTS := main.o crt0.o util.o
 LINKSCRIPT := monitor.ld
 
 $(BUILD_DIR)/%.o : src/%.S
@@ -29,7 +29,7 @@ $(BUILD_DIR)/%.o : src/%.c
 
 OBJPROG = $(addprefix $(BUILD_DIR)/, $(PROGS))
 
-all: $(OBJPROG)
+all: $(OBJPROG) $(addprefix $(BUILD_DIR)/, $(OBJECTS))
 
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
 	$(TOOLCHAIN)ld -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@

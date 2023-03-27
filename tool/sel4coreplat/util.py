@@ -129,6 +129,9 @@ class DisjointMemoryRegion:
             if base >= region.base and end <= region.end:
                 break
         else:
+            print("regions")
+            for region in self._regions:
+                print(region)
             raise ValueError(f"Attempting to remove region (0x{base:x}-0x{end:x}) that is not currently covered")
 
         if region.base == base and region.end == end:
