@@ -50,7 +50,7 @@ char _stack[4096];
 
 // static char pd_names[MAX_PDS][MAX_NAME_LEN];
 
-seL4_Word tcbs[MAX_TCBS];
+// seL4_Word tcbs[MAX_TCBS];
 
 extern const void (*const __init_array_start []) (void);
 extern const void (*const __init_array_end []) (void);
