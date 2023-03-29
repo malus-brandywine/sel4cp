@@ -150,14 +150,14 @@ monitor(void)
         tag = seL4_Recv(FAULT_EP_CAP_IDX, &badge);
         label = seL4_MessageInfo_get_label(tag);
 
-        seL4_Word tcb_cap = tcbs[badge];
+        // seL4_Word tcb_cap = tcbs[badge];
 
         puts("received message ");
         puthex32(label);
         puts("  badge: ");
         puthex64(badge);
-        puts("  tcb cap: ");
-        puthex64(tcb_cap);
+        // puts("  tcb cap: ");
+        // puthex64(tcb_cap);
         puts("\n");
 
         // if (badge < MAX_PDS && pd_names[badge][0] != 0) {
