@@ -15,6 +15,16 @@
 #define INPUT_CAP 1
 #define REPLY_CAP 4
 
+#if CONFIG_WORD_SIZE == 64
+#define IS_ENDPOINT_MASK ((uint64_t)1 << 63)
+#define IS_FAULT_MASK ((uint64_t)1 << 62)
+#elif CONFIG_WORD_SIZE == 32
+#define IS_ENDPOINT_MASK (1 << 27)
+#define IS_FAULT_MASK (1 << 26)
+#else
+#error "Unsupported libsel4cp word size!"
+#endif
+
 #define PD_MASK 0xff
 #define CHANNEL_MASK 0x3f
 
@@ -69,8 +79,8 @@ handler_loop(void)
             tag = seL4_Recv(INPUT_CAP, &badge, REPLY_CAP);
         }
 
-        uint64_t is_endpoint = badge >> 63;
-        uint64_t is_fault = (badge >> 62) & 1;
+        uint64_t is_endpoint = badge & IS_ENDPOINT_MASK;
+        uint64_t is_fault = badge & IS_FAULT_MASK;
 
         have_reply = false;
         have_signal = false;

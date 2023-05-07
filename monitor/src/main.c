@@ -258,7 +258,7 @@ perform_invocation(seL4_Word *invocation_data, unsigned offset, unsigned idx)
     seL4_Word service;
     seL4_Word service_incr;
     seL4_Word cmd = invocation_data[offset];
-    seL4_Word iterations = (cmd >> 32) + 1;
+    seL4_Word iterations = (cmd >> 29) + 1;
     seL4_Word tag0 = cmd & 0xffffffffULL;
     unsigned int cap_offset, cap_incr_offset, cap_count;
     unsigned int mr_offset, mr_incr_offset, mr_count;

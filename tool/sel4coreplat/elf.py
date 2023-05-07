@@ -110,6 +110,15 @@ ELF_SECTION_HEADER32_FIELDS = (
     "addralign",
     "entsize",
 )
+ELF_SYMBOL32 = Struct("<IIIBBH")
+ELF_SYMBOL32_FIELDS = (
+    "name",
+    "value",
+    "size",
+    "info",
+    "other",
+    "shndx",
+)
 
 ELF_HEADER64 = Struct("<BBBBxxxxxxxHHIQQQIHHHHHH")
 ELF_HEADER64_FIELDS = (
@@ -276,6 +285,8 @@ class ElfFile:
                 ph_fields = ELF_PROGRAM_HEADER32_FIELDS
                 sh_fmt = ELF_SECTION_HEADER32
                 sh_fields = ELF_SECTION_HEADER32_FIELDS
+                sym_fmt = ELF_SYMBOL32
+                sym_fields = ELF_SYMBOL32_FIELDS
                 elf = cls(word_size=32)
             elif class_ == 2:
                 hdr_fmt = ELF_HEADER64

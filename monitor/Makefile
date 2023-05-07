@@ -23,14 +23,19 @@ ifeq ($(ARCH),aarch64)
 	C_FLAGS := -std=gnu11 -g3 -O3 -nostdlib -ffreestanding -mcpu=$(GCC_CPU) -DARCH_aarch64 -Wall -Wno-maybe-uninitialized -Werror -I$(SEL4_SDK)/include
 	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g3 -mcpu=$(GCC_CPU)
 	ASM_FLAGS := -g3 -mcpu=$(GCC_CPU)
+	ARCH_DIR := aarch64
 else ifeq ($(ARCH),riscv64)
 	C_FLAGS := -mcmodel=medany -std=gnu11 -g3 -O3 -nostdlib -ffreestanding -march=rv64imac -mabi=lp64 -DARCH_riscv64 -Wall -Wno-maybe-uninitialized -Werror -I$(SEL4_SDK)/include
 	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g3 -march=rv64imac -mabi=lp64
 	ASM_FLAGS := -g3 -march=rv64imac -mabi=lp64
+	LD_FLAGS := -m elf64lriscv
+	ARCH_DIR := riscv
 else ifeq ($(ARCH),riscv32)
 	C_FLAGS := -mcmodel=medany -std=gnu11 -g3 -O3 -nostdlib -ffreestanding -march=rv32imac -mabi=ilp32 -DARCH_riscv32 -Wall -Wno-maybe-uninitialized -Werror -I$(SEL4_SDK)/include
 	ASM_CPP_FLAGS := -x assembler-with-cpp -c -g3 -march=rv32imac -mabi=ilp32
 	ASM_FLAGS := -g3 -march=rv32imac -mabi=ilp32
+	LD_FLAGS := -m elf32lriscv
+	ARCH_DIR := riscv
 else
 	$(error ARCH must be aarch64 or riscv64 or riscv32)
 endif
@@ -47,13 +52,13 @@ PROGS := monitor.elf
 OBJECTS := main.o crt0.o debug.o util.o
 LINKSCRIPT := monitor.ld
 
-$(BUILD_DIR)/%.o : src/$(ARCH)/%.S
+$(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.S
 	$(GCC) $(ASM_CPP_FLAGS) $< -o $@
 
-$(BUILD_DIR)/%.o : src/$(ARCH)/%.s
+$(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.s
 	$(AS) $(ASM_FLAGS) $< -o $@
 
-$(BUILD_DIR)/%.o : src/$(ARCH)/%.c
+$(BUILD_DIR)/%.o : src/$(ARCH_DIR)/%.c
 	$(GCC) -c $(C_FLAGS)  $< -o $@
 
 $(BUILD_DIR)/%.o : src/%.S
@@ -70,4 +75,4 @@ OBJPROG = $(addprefix $(BUILD_DIR)/, $(PROGS))
 all: $(OBJPROG)
 
 $(OBJPROG): $(addprefix $(BUILD_DIR)/, $(OBJECTS)) $(LINKSCRIPT)
-	$(TOOLCHAIN)ld -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@
+	$(TOOLCHAIN)ld $(LD_FLAGS) -T$(LINKSCRIPT) $(addprefix $(BUILD_DIR)/, $(OBJECTS)) -o $@

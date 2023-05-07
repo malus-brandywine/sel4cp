@@ -964,14 +964,15 @@ def build_system(
     if kernel_config.arch == KernelArch.AARCH64:
         arch_page_table_map = Sel4ARMPageTableMap
         arch_vm_attributes = SEL4_ARM_DEFAULT_VMATTRIBUTES
-    elif kernel_config.arch == KernelArch.RISCV64:
+    elif kernel_config.arch == KernelArch.RISCV64 or \
+            kernel_config.arch == KernelArch.RISCV32:
         arch_page_table_map = Sel4RISCVPageTableMap
         arch_vm_attributes = SEL4_RISCV_DEFAULT_VMATTRIBUTES
     elif kernel_config.arch == KernelArch.X86_64:
         arch_page_table_map = Sel4X86PageTableMap
         arch_vm_attributes = SEL4_X86_DEFAULT_VMATTRIBUTES
     else:
-        raise Exception(f"Unexpected kernel architecture: {arch}")
+        raise Exception(f"Unexpected kernel architecture: {kernel_config.arch}")
 
     invocation = arch_page_table_map(system_cap_address_mask | base_page_table_cap,
                                      INIT_VSPACE_CAP_ADDRESS,
@@ -984,7 +985,8 @@ def build_system(
     vaddr = 0x8000_0000
     if kernel_config.arch == KernelArch.AARCH64:
         arch_vm_attributes = SEL4_ARM_DEFAULT_VMATTRIBUTES | SEL4_ARM_EXECUTE_NEVER
-    elif kernel_config.arch == KernelArch.RISCV64:
+    elif kernel_config.arch == KernelArch.RISCV64 or \
+            kernel_config.arch == KernelArch.RISCV32:
         arch_vm_attributes = SEL4_RISCV_DEFAULT_VMATTRIBUTES | SEL4_RISCV_EXECUTE_NEVER
     elif kernel_config.arch == KernelArch.X86_64:
         arch_vm_attributes = SEL4_X86_DEFAULT_VMATTRIBUTES
@@ -1241,6 +1243,10 @@ def build_system(
         # Allocating for 3-level page table
         d_names = [f"PageTable: PD/VM={names[idx]} VADDR=0x{vaddr:x}" for idx, vaddr in ds]
         d_objects = init_system.allocate_objects(kernel_config, Sel4Object.PageTable, d_names)
+    elif kernel_config.arch == KernelArch.RISCV32:
+        # Do nothing, we only have the pages and the page tables. No 3rd or higher level
+        # of page table.
+        pass
     else:
         raise Exception(f"Unexpected kernel architecture: {arch}")
 
@@ -1310,6 +1316,7 @@ def build_system(
             assert len(mr_pages[mr]) > 0
             assert_objects_adjacent(mr_pages[mr])
 
+            print(f"CnodeMint: system_cnode_cap: system_cnode_cap")
             invocation = Sel4CnodeMint(system_cnode_cap,
                                        cap_slot,
                                        system_cnode_bits,
@@ -1369,7 +1376,7 @@ def build_system(
             assert pd.id_ is not None
             assert pd.parent is not None
             fault_ep_cap = pd_endpoint_objects[pd.parent].cap_addr
-            badge =  (1 << 62) | pd.id_
+            badge =  is_fault_mask | pd.id_
 
         invocation = Sel4CnodeMint(
             system_cnode_cap,
@@ -1398,7 +1405,7 @@ def build_system(
         fault_ep_cap = pd_endpoint_objects[parent_pd].cap_addr
         # @ivanv: Right now there's nothing stopping the vm_id being
         # the same as a pd_id. We should change this.
-        badge = (1 << 62) | vm.id_
+        badge = is_fault_mask | vm.id_
 
         invocation = Sel4CnodeMint(
             system_cnode_cap,
@@ -1570,10 +1577,21 @@ def build_system(
                 pd_b_badge)
         )
 
+        if kernel_config.word_size == 64:
+            is_endpoint_mask = 1 << 63
+            is_fault_mask = 1 << 62
+        elif kernel_config.word_size == 32:
+            # On 32-bit platforms, only the low 28 bits of the badge are
+            # available to be used.
+            is_endpoint_mask = 1 << 27
+            is_fault_mask = 1 << 26
+        else:
+            raise Exception(f"Unknown word size: {kernel_config.word_size}")
+
         # Set up the endpoint caps
         if pd_b.pp:
             pd_a_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + cc.id_a
-            pd_a_badge = (1 << 63) | cc.id_b
+            pd_a_badge = is_endpoint_mask | cc.id_b
             # pd_a.cnode.mint(pd_a_cap_idx, PD_CAPTABLE_BITS, sel4.init_cnode, pd_b.endpoint, 64, SEL4_RIGHTS_ALL, pd_a_badge)
             assert pd_b_endpoint_obj is not None
             assert pd_a_cap_idx < PD_CAP_SIZE
@@ -1591,7 +1609,7 @@ def build_system(
 
         if pd_a.pp:
             pd_b_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + cc.id_b
-            pd_b_badge = (1 << 63) | cc.id_a
+            pd_b_badge = is_endpoint_mask | cc.id_a
             #pd_b.cnode.mint(pd_b_cap_idx, PD_CAPTABLE_BITS, sel4.init_cnode, pd_a.endpoint, 64, SEL4_RIGHTS_ALL, pd_b_badge)
             assert pd_a_endpoint_obj is not None
             assert pd_b_cap_idx < PD_CAP_SIZE
@@ -1635,6 +1653,11 @@ def build_system(
         default_vm_attributes = SEL4_RISCV_DEFAULT_VMATTRIBUTES
         vspace_invocations = [
             (Sel4RISCVPageTableMap, ds, d_objects),
+            (Sel4RISCVPageTableMap, pts, pt_objects),
+        ]
+    elif kernel_config.arch == KernelArch.RISCV32:
+        default_vm_attributes = SEL4_RISCV_DEFAULT_VMATTRIBUTES
+        vspace_invocations = [
             (Sel4RISCVPageTableMap, pts, pt_objects),
         ]
     elif kernel_config.arch == KernelArch.AARCH64:
@@ -1924,14 +1947,14 @@ def main() -> int:
 
     kernel_config = KernelConfig(
         arch = arch,
-        word_size = sel4_config["WORD_SIZE"],
+        word_size = int(sel4_config["WORD_SIZE"]),
         minimum_page_size = kb(4),
         paddr_user_device_top = int(sel4_config["PADDR_USER_DEVICE_TOP"]),
         kernel_frame_size = (1 << 12),
         root_cnode_bits = int(sel4_config["ROOT_CNODE_SIZE_BITS"]),
         cap_address_bits = 64,
         fan_out_limit = int(sel4_config["RETYPE_FAN_OUT_LIMIT"]),
-        have_fpu = sel4_config["HAVE_FPU"],
+        have_fpu = bool(sel4_config["HAVE_FPU"]),
         hyp_mode = hyp_mode,
         num_cpus = int(sel4_config["MAX_NUM_NODES"]),
         # @ivanv: Perhaps there is a better way of seperating out arch specific config and regular config

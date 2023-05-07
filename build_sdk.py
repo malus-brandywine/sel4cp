@@ -366,6 +366,18 @@ SUPPORTED_BOARDS = (
     #     },
     #     examples = {}
     # ),
+    BoardInfo(
+        name="qemu_riscv_virt_32bit",
+        arch=BoardArch.RISCV32,
+        gcc_flags = "",
+        loader_link_address=0x80200000,
+        kernel_options = {
+            "KernelIsMCS": True,
+            "KernelPlatform": "qemu-riscv-virt",
+            "KernelSel4Arch": "riscv32",
+        },
+        examples = {}
+    ),
     # BoardInfo(
     #     name="qemu_riscv_virt_hyp",
     #     arch=BoardArch.RISCV64,
@@ -750,7 +762,7 @@ def main() -> None:
                 ("LINK_ADDRESS", hex(board.loader_link_address)),
                 ("NUM_CPUS", num_cpus),
             ]
-            if board.arch == BoardArch.RISCV64:
+            if board.arch == BoardArch.RISCV64 or board.arch == BoardArch.RISCV32:
                 # On RISC-V the loader needs to know the expected first HART ID.
                 assert "FIRST_HART_ID" in sel4_config
                 loader_defines.append(("FIRST_HART_ID", sel4_config["FIRST_HART_ID"]))

@@ -54,22 +54,20 @@ def str_to_bool(s: str) -> bool:
         return False
     raise ValueError("invalid boolean value")
 
-def machine_wrap(n: int) -> int:
-    # Note that we assume a 64-bit word size.
-    # @ivanv: maybe a bad assumption
-    return n & ((2 ** 64) - 1)
+def machine_wrap(n: int, word_size: int) -> int:
+    return n & ((2 ** word_size) - 1)
 
-def machine_add(a: int, b: int) -> int:
-    return machine_wrap(a + b)
+def machine_add(a: int, b: int, word_size: int) -> int:
+    return machine_wrap(a + b, word_size)
 
-def machine_sub(a: int, b: int) -> int:
-    return machine_wrap(a - b)
+def machine_sub(a: int, b: int, word_size: int) -> int:
+    return machine_wrap(a - b, word_size)
 
-def paddr_to_kernel_vaddr(kernel_virtual_base: int, paddr: int) -> int:
-    return machine_add(paddr, kernel_virtual_base)
+def paddr_to_kernel_vaddr(kernel_virtual_base: int, paddr: int, word_size: int) -> int:
+    return machine_add(paddr, kernel_virtual_base, word_size)
 
-def kernel_vaddr_to_paddr(kernel_virtual_base: int, kernel_vaddr: int) -> int:
-    return machine_sub(kernel_vaddr, kernel_virtual_base)
+def kernel_vaddr_to_paddr(kernel_virtual_base: int, kernel_vaddr: int, word_size: int) -> int:
+    return machine_sub(kernel_vaddr, kernel_virtual_base, word_size)
 
 
 @dataclass
@@ -80,7 +78,7 @@ class MemoryRegion:
     base: int
     end: int
 
-    def aligned_power_of_two_regions(self, kernel_virtual_base: int, max_bits: int) -> List["MemoryRegion"]:
+    def aligned_power_of_two_regions(self, kernel_virtual_base: int, max_bits: int, word_size: int) -> List["MemoryRegion"]:
         # During the boot phase, the kernel creates all of the untyped regions
         # based on the kernel virtual addresses, rather than the physical
         # memory addresses. This has a subtle side affect in the process of
@@ -92,10 +90,10 @@ class MemoryRegion:
         # emulate the kernel booting process, we also have to emulate the interger
         # overflow that can occur.
         r = []
-        base = paddr_to_kernel_vaddr(kernel_virtual_base, self.base)
-        end = paddr_to_kernel_vaddr(kernel_virtual_base, self.end)
+        base = paddr_to_kernel_vaddr(kernel_virtual_base, self.base, word_size)
+        end = paddr_to_kernel_vaddr(kernel_virtual_base, self.end, word_size)
         while base != end:
-            size = machine_sub(end, base)
+            size = machine_sub(end, base, word_size)
             size_bits = msb(size)
             if base == 0:
                 bits = size_bits
@@ -105,9 +103,9 @@ class MemoryRegion:
             if bits > max_bits:
                 bits = max_bits
             sz = 1 << bits
-            base_paddr = kernel_vaddr_to_paddr(kernel_virtual_base, base)
-            end_paddr = kernel_vaddr_to_paddr(kernel_virtual_base, base + sz)
-            base = machine_add(base, sz)
+            base_paddr = kernel_vaddr_to_paddr(kernel_virtual_base, base, word_size)
+            end_paddr = kernel_vaddr_to_paddr(kernel_virtual_base, base + sz, word_size)
+            base = machine_add(base, sz, word_size)
             r.append(MemoryRegion(base_paddr, end_paddr))
 
         return r
@@ -172,10 +170,10 @@ class DisjointMemoryRegion:
 
         self._check()
 
-    def aligned_power_of_two_regions(self, kernel_virtual_base: int, max_bits: int) -> List[MemoryRegion]:
+    def aligned_power_of_two_regions(self, kernel_virtual_base: int, max_bits: int, word_size: int) -> List[MemoryRegion]:
         r = []
         for region in self._regions:
-            r += region.aligned_power_of_two_regions(kernel_virtual_base, max_bits)
+            r += region.aligned_power_of_two_regions(kernel_virtual_base, max_bits, word_size)
         return r
 
     def allocate(self, size: int) -> int:
@@ -189,9 +187,9 @@ class DisjointMemoryRegion:
         # allocation
         for region in self._regions:
             # @ivanv: HACK, I think the loader when builidng the imx8mm vmm system will overwrite itself so we need this.
-            # if size <= region.size and region.base >= 0x84028000: # @ivanv
+            if size <= region.size and region.base >= 0x84000000: # @ivanv
             # if size <= region.size and region.base >= 0x60000000:
-            if size <= region.size:
+            # if size <= region.size:
                 break
         else:
             raise ValueError(f"Unable to allocate 0x{size:x} bytes.")

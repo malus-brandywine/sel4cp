@@ -14,8 +14,9 @@ from sel4coreplat.elf import ElfFile
 
 class KernelArch:
     AARCH64 = 1
-    RISCV64 = 2
-    X86_64 = 3
+    RISCV32 = 2
+    RISCV64 = 3
+    X86_64 = 4
 
 
 @dataclass(frozen=True, eq=True)
@@ -109,7 +110,7 @@ class Sel4Object(IntEnum):
             else:
                 return self
         else:
-            raise Exception(f"Unknown kernel architecture {arch}")
+            raise Exception(f"Unknown kernel architecture {kernel_config.arch}")
 
 
     def get_size(self, kernel_config: KernelConfig) -> Optional[int]:
@@ -296,6 +297,13 @@ def _get_arch_n_paging(kernel_config: KernelConfig, region: MemoryRegion) -> int
                 _get_n_paging(region, PUD_INDEX_OFFSET) +
                 _get_n_paging(region, PD_INDEX_OFFSET)
             )
+    elif kernel_config.arch == KernelArch.RISCV32:
+        PT_INDEX_OFFSET  =  12
+        PD_INDEX_OFFSET  =  (PT_INDEX_OFFSET + 9)
+
+        return (
+            _get_n_paging(region, PD_INDEX_OFFSET)
+        )
     elif kernel_config.arch == KernelArch.RISCV64:
         # ASSUMPTION: RISC-V platforms use Sv39 which means the kernel uses
         # 3 page table levels. See CONFIG_PT_LEVELS for details.
@@ -796,7 +804,7 @@ class Sel4Label(IntEnum):
                 return AARCH64_LABELS[self]
             else:
                 return self
-        elif kernel_config.arch == KernelArch.RISCV64:
+        elif kernel_config.arch == KernelArch.RISCV64 or kernel_config.arch == KernelArch.RISCV32:
             if self in RISCV_LABELS:
                 return RISCV_LABELS[self]
             else:
@@ -965,7 +973,7 @@ class Sel4Invocation:
         repeat_count = self._repeat_count if hasattr(self, "_repeat_count") else None
         tag = self.message_info_new(self.label.get_id(kernel_config), 0, len(extra_caps), len(args))
         if repeat_count:
-            tag |= ((repeat_count - 1) << 32)
+            tag |= ((repeat_count - 1) << 29)
         fmt = "<QQ" + ("Q" * (0 + len(extra_caps) + len(args)))
         all_args = (tag, self._service) + extra_caps + args
         base = pack(fmt, *all_args)
@@ -993,6 +1001,7 @@ class Sel4Invocation:
 
     @staticmethod
     def message_info_new(label: Sel4Label, caps: int, extra_caps: int, length: int) -> int:
+        # @ivanv: these asserts need to change for 32-bit
         assert label < (1 << 50)
         assert caps < 8
         assert extra_caps < 4
@@ -1172,7 +1181,7 @@ class Sel4AsidPoolAssign(Sel4Invocation):
     def __init__(self, arch: KernelArch, asid_pool: int, vspace: int):
         if arch == KernelArch.AARCH64:
             self.label = Sel4Label.ARMASIDPoolAssign
-        elif arch == KernelArch.RISCV64:
+        elif arch == KernelArch.RISCV64 or arch == KernelArch.RISCV32:
             self.label = Sel4Label.RISCVASIDPoolAssign
         elif arch == KernelArch.X86_64:
             self.label = Sel4LabelX86.X86ASIDPoolAssign
@@ -1269,7 +1278,8 @@ class Sel4PageMap(Sel4Invocation):
     def __init__(self, arch: KernelArch, page: int, vspace: int, vaddr: int, rights: int, attr: int):
         if arch == KernelArch.AARCH64:
             self.label = Sel4Label.ARMPageMap
-        elif arch == KernelArch.RISCV64:
+        elif arch == KernelArch.RISCV64 or \
+                arch == KernelArch.RISCV32:
             self.label = Sel4Label.RISCVPageMap
         elif arch == KernelArch.X86_64:
             self.label = Sel4Label.X86PageMap
@@ -1368,7 +1378,8 @@ def _kernel_device_addrs(arch: KernelArch, kernel_elf: ElfFile) -> List[int]:
     kernel_devices = []
     if arch == KernelArch.AARCH64:
         kernel_frame_t = Struct("<QQII")
-    elif arch == KernelArch.RISCV64:
+    elif arch == KernelArch.RISCV64 or arch == KernelArch.RISCV32:
+        # RISC-V 32-bit and 64-bit use the same kernel structure
         # @ivanv: for some reason, only on the HiFive, having QQI does not work
         kernel_frame_t = Struct("<QQQ")
     else:
@@ -1396,10 +1407,16 @@ def _kernel_device_addrs(arch: KernelArch, kernel_elf: ElfFile) -> List[int]:
     return kernel_devices
 
 
-def _kernel_phys_mem(kernel_elf: ElfFile) -> List[Tuple[int, int]]:
+def _kernel_phys_mem(kernel_elf: ElfFile, word_size: int) -> List[Tuple[int, int]]:
     """Extract a list of normal memory from the kernel elf file."""
     phys_mem = []
-    p_region_t = Struct("<QQ")
+    if word_size == 64:
+        p_region_t = Struct("<QQ")
+    elif word_size == 32:
+        p_region_t = Struct("<II")
+    else:
+        raise Exception(f"Unexpected word size: {word_size}")
+
     vaddr, size = kernel_elf.find_symbol("avail_p_regs")
     p_regs = kernel_elf.get_data(vaddr, size)
     offset = 0
@@ -1454,6 +1471,10 @@ def calculate_kernel_virtual_base(kernel_config: KernelConfig) -> int:
             return 2 ** 64 - 2 ** 39
         else:
             raise Exception("Unsupported number of RISC-V page table levels")
+    elif kernel_config.arch == KernelArch.RISCV32:
+        # @ivanv: need to check how this value is generated, for now it seems
+        # like it's just this?
+        return 0x80000000
     else:
         raise Exception(f"Unexpected kernel architecture: {kernel_config.arch}")
 
@@ -1482,17 +1503,19 @@ def _kernel_partial_boot(
     # It is possible that this assumption could break in the future.
     if kernel_config.arch == KernelArch.RISCV64:
         device_size = 1 << 21
+    elif kernel_config.arch == KernelArch.RISCV32:
+        device_size = 1 << 22
     elif kernel_config.arch == KernelArch.AARCH64:
         device_size = 1 << 12
     else:
-        raise Exception(f"Unexpected kernel architecture {config.arch}")
+        raise Exception(f"Unexpected kernel architecture {kernel_config.arch}")
 
     for paddr in _kernel_device_addrs(kernel_config.arch, kernel_elf):
         device_memory.remove_region(paddr, paddr + device_size)
 
     # Remove all the actual physical memory from the device regions
     # but add it all to the actual normal memory regions
-    for start, end in _kernel_phys_mem(kernel_elf):
+    for start, end in _kernel_phys_mem(kernel_elf, kernel_config.word_size):
         device_memory.remove_region(start, end)
         normal_memory.insert_region(start, end)
 
@@ -1564,15 +1587,18 @@ def emulate_kernel_boot(
         max_bits = 47
     elif kernel_config.arch == KernelArch.RISCV64:
         max_bits = 38
+    elif kernel_config.arch == KernelArch.RISCV32:
+        max_bits = 29
     else:
-        raise Exception(f"Unexpected kernel architecture: {arch}")
+        raise Exception(f"Unexpected kernel architecture: {kernel_config.arch}")
     # Cacluate the base address for kernel virtual memory, this is required
     # for computing the aligned regions
     kernel_virtual_base = calculate_kernel_virtual_base(kernel_config)
-    device_regions = reserved_region.aligned_power_of_two_regions(kernel_virtual_base, max_bits) \
-                        + device_memory.aligned_power_of_two_regions(kernel_virtual_base, max_bits)
-    normal_regions = boot_region.aligned_power_of_two_regions(kernel_virtual_base, max_bits) \
-                        + normal_memory.aligned_power_of_two_regions(kernel_virtual_base, max_bits)
+    word_size = kernel_config.word_size
+    device_regions = reserved_region.aligned_power_of_two_regions(kernel_virtual_base, max_bits, word_size) \
+                        + device_memory.aligned_power_of_two_regions(kernel_virtual_base, max_bits, word_size)
+    normal_regions = boot_region.aligned_power_of_two_regions(kernel_virtual_base, max_bits, word_size) \
+                        + normal_memory.aligned_power_of_two_regions(kernel_virtual_base, max_bits, word_size)
     untyped_objects = []
     for cap, r in enumerate(device_regions, first_untyped_cap):
         untyped_objects.append(UntypedObject(cap, r, True))
@@ -1603,6 +1629,8 @@ def calculate_rootserver_size(kernel_config: KernelConfig, initial_task_region: 
             tcb_bits = 11
         else:
             tcb_bits = 10
+    elif kernel_config.arch == KernelArch.RISCV32:
+        tcb_bits = 9
     elif kernel_config.arch == KernelArch.X86_64:
         # @ivanv: figure out whether there's a better way
         if kernel_config.x86_xsave_size >= 832:
@@ -1610,8 +1638,9 @@ def calculate_rootserver_size(kernel_config: KernelConfig, initial_task_region: 
         else:
             tcb_bits = 11
     else:
-        raise Exception(f"Unexpected kernel architecture: {arch}")
+        raise Exception(f"Unexpected kernel architecture: {kernel_config.arch}")
     page_bits = 12  # seL4_PageBits
+    # @ivanv: this is wrong!
     asid_pool_bits = 12  # seL4_ASIDPoolBits
     # @ivanv: remove hard-coding
     # Determining seL4_VSpaceBits
@@ -1645,7 +1674,7 @@ def arch_get_map_attrs(arch: KernelArch, cached: bool, perms: str) -> int:
             attrs |= SEL4_ARM_PAGE_CACHEABLE
         if "x" not in perms:
             attrs |= SEL4_ARM_EXECUTE_NEVER
-    elif arch == KernelArch.RISCV64:
+    elif arch == KernelArch.RISCV64 or arch == KernelArch.RISCV32:
         if "x" not in perms:
             attrs |= SEL4_RISCV_EXECUTE_NEVER
     elif arch == KernelArch.X86_64:
@@ -1659,7 +1688,7 @@ def arch_get_map_attrs(arch: KernelArch, cached: bool, perms: str) -> int:
 
 # @ivanv: TODO, support Huge page sizes for all architectures
 def arch_get_page_objects(arch: KernelArch) -> [int]:
-    if arch == KernelArch.AARCH64 or arch == KernelArch.RISCV64 or arch == KernelArch.X86_64:
+    if arch == KernelArch.AARCH64 or arch == KernelArch.RISCV64 or arch == KernelArch.RISCV32 or arch == KernelArch.X86_64:
         return [Sel4Object.SmallPage, Sel4Object.LargePage]
     else:
         raise Exception(f"Unexpected kernel architecture: {arch}")
@@ -1668,5 +1697,7 @@ def arch_get_page_objects(arch: KernelArch) -> [int]:
 def arch_get_page_sizes(arch: KernelArch) -> [int]:
     if arch == KernelArch.AARCH64 or arch == KernelArch.RISCV64 or arch == KernelArch.X86_64:
         return [0x1000, 0x200_000]
+    elif arch == KernelArch.RISCV32:
+        return [0x1000, 0x400_000]
     else:
         raise Exception(f"Unexpected kernel architecture: {arch}")
