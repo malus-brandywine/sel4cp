@@ -1612,13 +1612,13 @@ def build_system(
     for idx, (cnode_obj, pd) in enumerate(zip(cnode_objects, system.protection_domains), 1):
         if pd.passive:
             system_invocations.append(Sel4CnodeMint(
-                                        cnode_obj.cap_addr, 
-                                        MONITOR_EP_CAP_IDX, 
-                                        PD_CAP_BITS, 
-                                        root_cnode_cap, 
-                                        fault_ep_endpoint_object.cap_addr, 
+                                        cnode_obj.cap_addr,
+                                        MONITOR_EP_CAP_IDX,
+                                        PD_CAP_BITS,
+                                        root_cnode_cap,
+                                        fault_ep_endpoint_object.cap_addr,
                                         kernel_config.cap_address_bits,
-                                        SEL4_RIGHTS_ALL, 
+                                        SEL4_RIGHTS_ALL,
                                         idx))
 
     # All minting is complete at this point
