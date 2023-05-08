@@ -867,6 +867,8 @@ def build_system(
     # Slot #1 of the new root cnode
     guard = kernel_config.cap_address_bits - root_cnode_bits - system_cnode_bits
     system_cap_address_mask = 1 << (kernel_config.cap_address_bits - 1)
+    print(f"system_cap_address_mask: {system_cap_address_mask}")
+    assert system_cap_address_mask <= 2 ** kernel_config.word_size
     bootstrap_invocations.append(Sel4CnodeMint(
         root_cnode_cap,
         1,
@@ -1952,7 +1954,7 @@ def main() -> int:
         paddr_user_device_top = int(sel4_config["PADDR_USER_DEVICE_TOP"]),
         kernel_frame_size = (1 << 12),
         root_cnode_bits = int(sel4_config["ROOT_CNODE_SIZE_BITS"]),
-        cap_address_bits = 64,
+        cap_address_bits = int(sel4_config["WORD_SIZE"]),
         fan_out_limit = int(sel4_config["RETYPE_FAN_OUT_LIMIT"]),
         have_fpu = bool(sel4_config["HAVE_FPU"]),
         hyp_mode = hyp_mode,
@@ -2040,8 +2042,16 @@ def main() -> int:
 
         raise UserError("bootstrap invocations too large for monitor")
 
-    monitor_elf.write_symbol(MONITOR_CONFIG.bootstrap_invocation_count_symbol_name, pack("<Q", len(built_system.bootstrap_invocations)))
-    monitor_elf.write_symbol(MONITOR_CONFIG.system_invocation_count_symbol_name, pack("<Q", len(built_system.system_invocations)))
+    if kernel_config.word_size == 64:
+        pack_int = "<Q"
+        word_size_int = "Q"
+    elif kernel_config.word_size == 32:
+        pack_int = "<I"
+        word_size_int = "I"
+    else:
+        raise Exception(f"Unknown word size: {kernel_config.word_size}")
+    monitor_elf.write_symbol(MONITOR_CONFIG.bootstrap_invocation_count_symbol_name, pack(pack_int, len(built_system.bootstrap_invocations)))
+    monitor_elf.write_symbol(MONITOR_CONFIG.system_invocation_count_symbol_name, pack(pack_int, len(built_system.system_invocations)))
     monitor_elf.write_symbol(MONITOR_CONFIG.bootstrap_invocation_data_symbol_name, bootstrap_invocation_data)
 
     system_invocation_data_array = bytearray()
@@ -2055,11 +2065,12 @@ def main() -> int:
     tcb_caps = built_system.tcb_caps
     sched_caps = built_system.sched_caps
     ntfn_caps = built_system.ntfn_caps
-    monitor_elf.write_symbol("fault_ep", pack("<Q", built_system.fault_ep_cap_address))
-    monitor_elf.write_symbol("reply", pack("<Q", built_system.reply_cap_address))
-    monitor_elf.write_symbol("tcbs", pack("<Q" + "Q" * len(tcb_caps), 0, *tcb_caps))
-    monitor_elf.write_symbol("scheduling_contexts", pack("<Q" + "Q" * len(sched_caps), 0, *sched_caps))
-    monitor_elf.write_symbol("notification_caps", pack("<Q" + "Q" * len(ntfn_caps), 0, *ntfn_caps))
+    print(f"=== {built_system.fault_ep_cap_address}")
+    monitor_elf.write_symbol("fault_ep", pack(pack_int, built_system.fault_ep_cap_address))
+    monitor_elf.write_symbol("reply", pack(pack_int, built_system.reply_cap_address))
+    monitor_elf.write_symbol("tcbs", pack(pack_int + word_size_int * len(tcb_caps), 0, *tcb_caps))
+    monitor_elf.write_symbol("scheduling_contexts", pack(pack_int + word_size_int * len(sched_caps), 0, *sched_caps))
+    monitor_elf.write_symbol("notification_caps", pack(pack_int + word_size_int * len(ntfn_caps), 0, *ntfn_caps))
     names_array = bytearray([0] * (64 * 16))
     for idx, pd in enumerate(system_description.protection_domains, 1):
         nm = pd.name.encode("utf8")[:15]

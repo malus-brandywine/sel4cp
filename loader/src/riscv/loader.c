@@ -68,10 +68,10 @@ typedef void (*sel4_entry)(
 char _stack[STACK_SIZE] ALIGN(16);
 
 /* Paging structures for kernel mapping */
-uint64_t boot_lvl1_pt[1 << 9] ALIGN(1 << 12);
-uint64_t boot_lvl2_pt[1 << 9] ALIGN(1 << 12);
+uintptr_t boot_lvl1_pt[1 << 9] ALIGN(1 << 12);
+uintptr_t boot_lvl2_pt[1 << 9] ALIGN(1 << 12);
 /* Paging structures for identity mapping */
-uint64_t boot_lvl2_pt_elf[1 << 9] ALIGN(1 << 12);
+uintptr_t boot_lvl2_pt_elf[1 << 9] ALIGN(1 << 12);
 
 extern char _text;
 extern char _text_end;
@@ -250,7 +250,11 @@ static inline void ifence(void)
  * This is the encoding for the MODE field of the satp register when
  * implementing 39-bit virtual address spaces (known as Sv39).
  */
+#if WORD_SIZE == 64
 #define VM_MODE (0x8llu << 60)
+#else
+#error "sort this out"
+#endif
 
 #define RISCV_PGSHIFT 12
 
@@ -275,9 +279,11 @@ int
 main(void)
 {
     puts("LDR|INFO: altloader for seL4 starting\n");
+    print_loader_data();
     /* Check that the loader magic number is set correctly */
     if (loader_data->magic != MAGIC) {
         puts("LDR|ERROR: mismatch on loader data structure magic number\n");
+        puthex64(loader_data->magic);
         return 1;
     }
 

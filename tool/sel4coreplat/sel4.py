@@ -98,10 +98,17 @@ class Sel4Object(IntEnum):
             else:
                 return self
         elif kernel_config.arch == KernelArch.RISCV64:
-            if kernel_config.hyp_mode and self in RISCV64_HYP_OBJECTS:
-                return RISCV64_HYP_OBJECTS[self]
+            if kernel_config.hyp_mode and self in RISCV_HYP_OBJECTS:
+                return RISCV_HYP_OBJECTS[self]
             elif self in RISCV64_OBJECTS:
                 return RISCV64_OBJECTS[self]
+            else:
+                return self
+        elif kernel_config.arch == KernelArch.RISCV32:
+            if kernel_config.hyp_mode and self in RISCV_HYP_OBJECTS:
+                return RISCV64_HYP_OBJECTS[self]
+            elif self in RISCV32_OBJECTS:
+                return RISCV32_OBJECTS[self]
             else:
                 return self
         elif kernel_config.arch == KernelArch.X86_64:
@@ -157,8 +164,16 @@ RISCV64_OBJECTS = {
     Sel4Object.Vspace: 10,
 }
 
-RISCV64_HYP_OBJECTS = {
-    Sel4Object.Vcpu: 11,
+RISCV_HYP_OBJECTS = {
+    Sel4Object.Vcpu: 10,
+}
+
+RISCV32_OBJECTS = {
+    Sel4Object.SmallPage: 7,
+    Sel4Object.LargePage: 8,
+    Sel4Object.PageTable: 9,
+    # A VSpace on RISC-V is represented by a PageTable
+    Sel4Object.Vspace: 9,
 }
 
 # @ivanv: Double check these, not sure about the first two and the last one.
@@ -970,6 +985,7 @@ class Sel4Invocation:
     _method_name: str
 
     def _generic_invocation(self, kernel_config: KernelConfig, extra_caps: Tuple[int, ...], args: Tuple[int, ...]) -> bytes:
+        assert kernel_config.word_size == 64
         repeat_count = self._repeat_count if hasattr(self, "_repeat_count") else None
         tag = self.message_info_new(self.label.get_id(kernel_config), 0, len(extra_caps), len(args))
         if repeat_count:

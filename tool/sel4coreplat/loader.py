@@ -189,7 +189,7 @@ class Loader:
                 pagetable_vars = self._arm_setup_pagetables_hyp(kernel_first_vaddr, kernel_first_paddr)
             else:
                 pagetable_vars = self._arm_setup_pagetables(kernel_first_vaddr, kernel_first_paddr)
-        elif kernel_config.arch == KernelArch.RISCV64:
+        elif kernel_config.arch == KernelArch.RISCV64 or kernel_config.arch == KernelArch.RISCV32:
             pagetable_vars = self._riscv_setup_pagetables(kernel_config.riscv_page_table_levels,
                                                           kernel_first_vaddr,
                                                           kernel_first_paddr)
@@ -296,6 +296,7 @@ class Loader:
         }
 
     def _riscv_setup_pagetables(self, pt_levels: int, first_vaddr: int, first_paddr: int) -> Dict[str, bytes]:
+        assert pt_levels == 3
         # Note that this function makes the assumption that we are to run on a
         # 64-bit RISC-V platform.
         # @ivanv: Revisit this function and comment it, it is difficult to come back to and understand
