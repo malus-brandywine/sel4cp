@@ -709,6 +709,12 @@ def build_sel4_config_component(
     copy(sel4_gen_config, dest)
     dest.chmod(0o444)
 
+    sel4_json_config = sel4_build_dir / "gen_config/kernel/gen_config.json"
+    dest = root_dir / "board" / board.name / config.name / "config.json"
+    dest.unlink(missing_ok=True)
+    copy(sel4_json_config, dest)
+    dest.chmod(0o444)
+
     return sel4_config
 
 
