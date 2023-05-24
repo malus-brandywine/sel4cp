@@ -51,13 +51,13 @@ ifeq ($(ARCH),aarch64)
 else ifeq ($(ARCH),riscv64)
 	MARCH := rv64imac
 	MABI := lp64
-	C_FLAGS_ARCH := -mcmodel=medany -march=$(MARCH) -mabi=$(MABI)
+	C_FLAGS_ARCH := -mcmodel=medany -march=$(MARCH) -mabi=$(MABI) -DPAGE_TABLE_LEVELS=$(PAGE_TABLE_LEVELS)
 	ASM_CPP_FLAGS_ARCH := -march=$(MARCH) -mabi=$(MABI) -DFIRST_HART_ID=$(FIRST_HART_ID)
 	ASM_FLAGS_ARCH := -march=$(MARCH) -mabi=$(MABI)
 else ifeq ($(ARCH),riscv32)
 	MARCH := rv32imac
 	MABI := ilp32
-	C_FLAGS_ARCH := -mcmodel=medany -march=$(MARCH) -mabi=$(MABI)
+	C_FLAGS_ARCH := -mcmodel=medany -march=$(MARCH) -mabi=$(MABI) -DPAGE_TABLE_LEVELS=$(PAGE_TABLE_LEVELS)
 	ASM_CPP_FLAGS_ARCH := -march=$(MARCH) -mabi=$(MABI) -DFIRST_HART_ID=$(FIRST_HART_ID)
 	ASM_FLAGS_ARCH := -march=$(MARCH) -mabi=$(MABI)
 	LD_FLAGS_ARCH := -m elf32lriscv

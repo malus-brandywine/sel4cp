@@ -108,6 +108,11 @@ from sel4coreplat.sysxml import ProtectionDomain, xml2system, SystemDescription,
 from sel4coreplat.sysxml import SysMap, SysMemoryRegion # This shouldn't be needed here as such
 from sel4coreplat.loader import Loader, _check_non_overlapping
 
+# @rv32: the commit that fixes the xml parsing for max IRQ/channel ID needs to be fixed to consider
+# 32-bit systems
+# @rv32: don't think we need to raise exception if wrong word_size, maybe just an assert when
+# building teh SDK
+
 # This is a workaround for: https://github.com/indygreg/PyOxidizer/issues/307
 # Basically, pyoxidizer generates code that results in argv[0] being set to None.
 # ArgumentParser() very much relies on a non-None argv[0]!
@@ -136,8 +141,8 @@ class MonitorConfig:
 # rework of this tool
 MONITOR_CONFIG = MonitorConfig(
     untyped_info_symbol_name = "untyped_info",
-    untyped_info_header_struct = Struct("<QQ"),
-    untyped_info_object_struct = Struct("<QQQ"),
+    untyped_info_header_struct = Struct("<QQ"), # @rv32
+    untyped_info_object_struct = Struct("<QQQ"), # @rv32
     bootstrap_invocation_count_symbol_name = "bootstrap_invocation_count",
     bootstrap_invocation_data_symbol_name = "bootstrap_invocation_data",
     system_invocation_count_symbol_name = "system_invocation_count",
@@ -1250,7 +1255,7 @@ def build_system(
         # of page table.
         pass
     else:
-        raise Exception(f"Unexpected kernel architecture: {arch}")
+        raise Exception(f"Unexpected kernel architecture: {kernel_config.arch}")
 
     pt_names = [f"PageTable: PD/VM={names[idx]} VADDR=0x{vaddr:x}" for idx, vaddr in pts]
     pt_objects = init_system.allocate_objects(kernel_config, Sel4Object.PageTable, pt_names)
@@ -1364,6 +1369,17 @@ def build_system(
             cap_address_names[badged_cap_address] = cap_address_names[notification_obj.cap_addr] + f" (badge=0x{badge:x})"
             badged_irq_caps[pd].append(badged_cap_address)
             cap_slot += 1
+
+    if kernel_config.word_size == 64:
+        is_endpoint_mask = 1 << 63
+        is_fault_mask = 1 << 62
+    elif kernel_config.word_size == 32:
+        # On 32-bit platforms, only the low 28 bits of the badge are
+        # available to be used.
+        is_endpoint_mask = 1 << 27
+        is_fault_mask = 1 << 26
+    else:
+        raise Exception(f"Unknown word size: {kernel_config.word_size}")
 
     # Create a fault endpoint cap for each protection domain.
     # For root PDs this shall be the system fault_ep_endpoint_object.
@@ -1579,17 +1595,6 @@ def build_system(
                 pd_b_badge)
         )
 
-        if kernel_config.word_size == 64:
-            is_endpoint_mask = 1 << 63
-            is_fault_mask = 1 << 62
-        elif kernel_config.word_size == 32:
-            # On 32-bit platforms, only the low 28 bits of the badge are
-            # available to be used.
-            is_endpoint_mask = 1 << 27
-            is_fault_mask = 1 << 26
-        else:
-            raise Exception(f"Unknown word size: {kernel_config.word_size}")
-
         # Set up the endpoint caps
         if pd_b.pp:
             pd_a_cap_idx = BASE_OUTPUT_ENDPOINT_CAP + cc.id_a
@@ -1677,7 +1682,7 @@ def build_system(
                 (Sel4ARMPageTableMap, pts, pt_objects),
             ]
     else:
-        raise Exception(f"Unexpected kernel architecture: {arch}")
+        raise Exception(f"Unexpected kernel architecture: {kernel_config.arch}")
 
     for map_cls, descriptors, objects in vspace_invocations:
         for ((pd_idx, vaddr), obj) in zip(descriptors, objects):
@@ -1824,7 +1829,8 @@ def build_system(
             elif setvar.vaddr is not None:
                 value = setvar.vaddr
             try:
-                pd_elf_files[pd].write_symbol(setvar.symbol, pack("<Q", value))
+                pack_int = "<Q" if kernel_config.word_size == 64 else "<I"
+                pd_elf_files[pd].write_symbol(setvar.symbol, pack(pack_int, value))
             except KeyError:
                 raise Exception(f"Unable to patch variable '{setvar.symbol}' in protection domain: '{pd.name}': variable not found.")
 

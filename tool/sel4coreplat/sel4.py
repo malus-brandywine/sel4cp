@@ -12,7 +12,7 @@ from sel4coreplat.util import MemoryRegion, DisjointMemoryRegion, UserError, lsb
 from sel4coreplat.elf import ElfFile
 
 
-class KernelArch:
+class KernelArch(IntEnum):
     AARCH64 = 1
     RISCV32 = 2
     RISCV64 = 3
@@ -64,8 +64,8 @@ class KernelConfig:
     have_fpu: bool
     hyp_mode: bool
     num_cpus: int
-    arm_pa_size_bits: int
-    riscv_page_table_levels: int
+    arm_pa_size_bits: Optional[int]
+    riscv_page_table_levels: Optional[int]
     x86_xsave_size: int
 
 # Kernel Objects:
@@ -106,7 +106,7 @@ class Sel4Object(IntEnum):
                 return self
         elif kernel_config.arch == KernelArch.RISCV32:
             if kernel_config.hyp_mode and self in RISCV_HYP_OBJECTS:
-                return RISCV64_HYP_OBJECTS[self]
+                return RISCV_HYP_OBJECTS[self]
             elif self in RISCV32_OBJECTS:
                 return RISCV32_OBJECTS[self]
             else:
@@ -164,10 +164,6 @@ RISCV64_OBJECTS = {
     Sel4Object.Vspace: 10,
 }
 
-RISCV_HYP_OBJECTS = {
-    Sel4Object.Vcpu: 10,
-}
-
 RISCV32_OBJECTS = {
     Sel4Object.SmallPage: 7,
     Sel4Object.LargePage: 8,
@@ -175,6 +171,11 @@ RISCV32_OBJECTS = {
     # A VSpace on RISC-V is represented by a PageTable
     Sel4Object.Vspace: 9,
 }
+
+RISCV_HYP_OBJECTS = {
+    Sel4Object.Vcpu: 10,
+}
+
 
 # @ivanv: Double check these, not sure about the first two and the last one.
 # X86_64_OBJECTS = {
@@ -985,17 +986,24 @@ class Sel4Invocation:
     _method_name: str
 
     def _generic_invocation(self, kernel_config: KernelConfig, extra_caps: Tuple[int, ...], args: Tuple[int, ...]) -> bytes:
-        assert kernel_config.word_size == 64
+        if kernel_config.word_size == 64:
+            pack_int = "Q"
+        elif kernel_config.word_size == 32:
+            pack_int = "I"
+        else:
+            raise Exception(f"Unexpected word size: {kernel_config.word_size}")
+
         repeat_count = self._repeat_count if hasattr(self, "_repeat_count") else None
         tag = self.message_info_new(self.label.get_id(kernel_config), 0, len(extra_caps), len(args))
         if repeat_count:
+            # @rv32
             tag |= ((repeat_count - 1) << 29)
-        fmt = "<QQ" + ("Q" * (0 + len(extra_caps) + len(args)))
+        fmt = "<" + pack_int + pack_int + (pack_int * (0 + len(extra_caps) + len(args)))
         all_args = (tag, self._service) + extra_caps + args
         base = pack(fmt, *all_args)
         if repeat_count:
             repeat_incr = self._repeat_incr
-            extra_fmt = "<Q" + ("Q" * (0 + len(extra_caps) + len(args)))
+            extra_fmt = "<" + pack_int + (pack_int * (0 + len(extra_caps) + len(args)))
             service: int = repeat_incr.get(fields(self)[0].name, 0)
             cap_args: Tuple[int, ...] = tuple(repeat_incr.get(f.name, 0) for f in fields(self)[1:] if f.name in self._extra_caps)
             val_args: Tuple[int, ...] = tuple(repeat_incr.get(f.name, 0) for f in fields(self)[1:] if f.name not in self._extra_caps)

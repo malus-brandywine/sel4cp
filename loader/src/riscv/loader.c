@@ -67,11 +67,17 @@ typedef void (*sel4_entry)(
 
 char _stack[STACK_SIZE] ALIGN(16);
 
+#if WORD_SIZE == 64
+#define NUM_PAGE_TABLE_ENTRIES (1 << 9)
+#else
+#define NUM_PAGE_TABLE_ENTRIES (1 << 10)
+#endif
+
 /* Paging structures for kernel mapping */
-uintptr_t boot_lvl1_pt[1 << 9] ALIGN(1 << 12);
-uintptr_t boot_lvl2_pt[1 << 9] ALIGN(1 << 12);
+uintptr_t boot_lvl1_pt[NUM_PAGE_TABLE_ENTRIES] ALIGN(1 << 12);
+uintptr_t boot_lvl2_pt[NUM_PAGE_TABLE_ENTRIES] ALIGN(1 << 12);
 /* Paging structures for identity mapping */
-uintptr_t boot_lvl2_pt_elf[1 << 9] ALIGN(1 << 12);
+uintptr_t boot_lvl2_pt_elf[NUM_PAGE_TABLE_ENTRIES] ALIGN(1 << 12);
 
 extern char _text;
 extern char _text_end;
@@ -248,12 +254,19 @@ static inline void ifence(void)
 
 /*
  * This is the encoding for the MODE field of the satp register when
- * implementing 39-bit virtual address spaces (known as Sv39).
- */
-#if WORD_SIZE == 64
-#define VM_MODE (0x8llu << 60)
+ * virtual address spaces. */
+// @ivanv shouldn't we have this outside this? I reckon this
+// should be a build time or a symbol value, not sure
+// @ivanv: on second thought, yes I think this definitely
+// should be outside
+#if PAGE_TABLE_LEVELS == 2
+#define VM_MODE (0x1 << 31)
+#elif PAGE_TABLE_LEVELS == 3
+#define VM_MODE ((uint64_t)0x8 << 60)
+#elif PAGE_TABLE_LEVELS == 4
+#define VM_MODE ((uint64_t)0x9 << 60)
 #else
-#error "sort this out"
+#error "Unsupported RISC-V page table level"
 #endif
 
 #define RISCV_PGSHIFT 12
@@ -279,7 +292,6 @@ int
 main(void)
 {
     puts("LDR|INFO: altloader for seL4 starting\n");
-    print_loader_data();
     /* Check that the loader magic number is set correctly */
     if (loader_data->magic != MAGIC) {
         puts("LDR|ERROR: mismatch on loader data structure magic number\n");

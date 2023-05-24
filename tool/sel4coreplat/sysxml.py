@@ -72,7 +72,7 @@ class SysMap:
 class SysIrq:
     irq: int
     id_: int
-    trigger: str
+    trigger: Sel4ArmIrqTrigger
 
 
 @dataclass(frozen=True, eq=True)

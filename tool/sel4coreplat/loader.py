@@ -23,7 +23,9 @@ AARCH64_LVL2_BITS = 9
 
 # Note that we're setting up page tables for a RISC-V system with Sv39 virtual memory.
 RISCV64_PAGE_TABLE_SIZE = 4096
+RISCV32_PAGE_TABLE_SIZE = 4096
 
+RISCV32_4MB_BLOCK_BITS = 22
 RISCV64_2MB_BLOCK_BITS = 21
 
 RISCV_PT_INDEX_BITS = 9
@@ -189,16 +191,19 @@ class Loader:
                 pagetable_vars = self._arm_setup_pagetables_hyp(kernel_first_vaddr, kernel_first_paddr)
             else:
                 pagetable_vars = self._arm_setup_pagetables(kernel_first_vaddr, kernel_first_paddr)
-        elif kernel_config.arch == KernelArch.RISCV64 or kernel_config.arch == KernelArch.RISCV32:
-            pagetable_vars = self._riscv_setup_pagetables(kernel_config.riscv_page_table_levels,
+        elif kernel_config.arch == KernelArch.RISCV64:
+            pagetable_vars = self._riscv64_setup_pagetables(kernel_config.riscv_page_table_levels,
                                                           kernel_first_vaddr,
                                                           kernel_first_paddr)
+        elif kernel_config.arch == KernelArch.RISCV32:
+            pagetable_vars = self._riscv32_setup_pagetables(kernel_first_vaddr, kernel_first_paddr)
         else:
             raise Exception(f"Unexpected kernel architecture: {kernel_config.arch}")
 
         for var_name, var_data in pagetable_vars.items():
             var_addr, var_size = self._elf.find_symbol(var_name)
             offset = var_addr - loader_segment.virt_addr
+            print(f"var name: {var_name}, var_size: {var_size}, var_data len: {len(var_data)}")
             assert var_size == len(var_data)
             assert offset > 0
             assert offset <= len(self._image)
@@ -295,10 +300,11 @@ class Loader:
             "boot_lvl2_upper": boot_lvl2_upper,
         }
 
-    def _riscv_setup_pagetables(self, pt_levels: int, first_vaddr: int, first_paddr: int) -> Dict[str, bytes]:
-        assert pt_levels == 3
-        # Note that this function makes the assumption that we are to run on a
-        # 64-bit RISC-V platform.
+    def _riscv64_setup_pagetables(self, page_table_levels: int, first_vaddr: int, first_paddr: int) -> Dict[str, bytes]:
+        # Currently we assume a system with a Sv39 virtual memory system which
+        # has 3 page table levels. @ivanv: TODO fix this assumption
+        assert page_table_levels == 3
+
         # @ivanv: Revisit this function and comment it, it is difficult to come back to and understand
 
         text_addr, _  = self._elf.find_symbol("_text")
@@ -306,12 +312,12 @@ class Loader:
         boot_lvl2_pt_addr, _ = self._elf.find_symbol("boot_lvl2_pt")
         boot_lvl2_pt_elf_addr, _ = self._elf.find_symbol("boot_lvl2_pt_elf")
 
-        index = riscv_get_pt_index(pt_levels, text_addr, RISCV_PT_LEVEL_1)
+        index = riscv_get_pt_index(page_table_levels, text_addr, RISCV_PT_LEVEL_1)
 
         boot_lvl1_pt = bytearray(RISCV64_PAGE_TABLE_SIZE)
         boot_lvl1_pt[8*index:8*(index+1)] = pack("<Q", riscv_pte_create_next(boot_lvl2_pt_elf_addr))
 
-        lvl2_elf_index = riscv_get_pt_index(pt_levels, text_addr, RISCV_PT_LEVEL_2)
+        lvl2_elf_index = riscv_get_pt_index(page_table_levels, text_addr, RISCV_PT_LEVEL_2)
 
         boot_lvl2_pt_elf = bytearray(RISCV64_PAGE_TABLE_SIZE)
 
@@ -320,14 +326,55 @@ class Loader:
             boot_lvl2_pt_elf[8*i:8*(i+1)] = pack("<Q", riscv_pte_create_leaf(text_addr + (page << RISCV64_2MB_BLOCK_BITS)))
             page += 1
 
-        index = riscv_get_pt_index(pt_levels, first_vaddr, RISCV_PT_LEVEL_1)
+        index = riscv_get_pt_index(page_table_levels, first_vaddr, RISCV_PT_LEVEL_1)
         boot_lvl1_pt[8*index:8*(index+1)] = pack("<Q", riscv_pte_create_next(boot_lvl2_pt_addr))
 
-        index = riscv_get_pt_index(pt_levels, first_vaddr, RISCV_PT_LEVEL_2)
+        index = riscv_get_pt_index(page_table_levels, first_vaddr, RISCV_PT_LEVEL_2)
         boot_lvl2_pt = bytearray(RISCV64_PAGE_TABLE_SIZE)
         page = 0
         for i in range(index, 512):
             boot_lvl2_pt[8*i:8*(i+1)] = pack("<Q", riscv_pte_create_leaf(first_paddr + (page << RISCV64_2MB_BLOCK_BITS)))
+            page += 1
+
+        return {
+            "boot_lvl1_pt": boot_lvl1_pt,
+            "boot_lvl2_pt": boot_lvl2_pt,
+            "boot_lvl2_pt_elf": boot_lvl2_pt_elf,
+        }
+
+    def _riscv32_setup_pagetables(self, first_vaddr: int, first_paddr: int) -> Dict[str, bytes]:
+        # At the time of writing the only supported virtual memory system for
+        # 32-bit RISC-V is Sv32, which has two page table levels. This function
+        # assumes that the system is Sv32.
+        text_addr, _  = self._elf.find_symbol("_text")
+        boot_lvl1_pt_addr, _ = self._elf.find_symbol("boot_lvl1_pt")
+        boot_lvl2_pt_addr, _ = self._elf.find_symbol("boot_lvl2_pt")
+        boot_lvl2_pt_elf_addr, _ = self._elf.find_symbol("boot_lvl2_pt_elf")
+
+        page_table_levels = 2
+
+        index = riscv_get_pt_index(page_table_levels, text_addr, RISCV_PT_LEVEL_1)
+
+        boot_lvl1_pt = bytearray(RISCV32_PAGE_TABLE_SIZE)
+        boot_lvl1_pt[4*index:4*(index+1)] = pack("<I", riscv_pte_create_next(boot_lvl2_pt_elf_addr))
+
+        lvl2_elf_index = riscv_get_pt_index(page_table_levels, text_addr, RISCV_PT_LEVEL_2)
+
+        boot_lvl2_pt_elf = bytearray(RISCV32_PAGE_TABLE_SIZE)
+
+        page = 0
+        for i in range(lvl2_elf_index, 512):
+            boot_lvl2_pt_elf[4*i:4*(i+1)] = pack("<I", riscv_pte_create_leaf(text_addr + (page << RISCV32_4MB_BLOCK_BITS)))
+            page += 1
+
+        index = riscv_get_pt_index(page_table_levels, first_vaddr, RISCV_PT_LEVEL_1)
+        boot_lvl1_pt[4*index:4*(index+1)] = pack("<I", riscv_pte_create_next(boot_lvl2_pt_addr))
+
+        index = riscv_get_pt_index(page_table_levels, first_vaddr, RISCV_PT_LEVEL_2)
+        boot_lvl2_pt = bytearray(RISCV32_PAGE_TABLE_SIZE)
+        page = 0
+        for i in range(index, 512):
+            boot_lvl2_pt[4*i:4*(i+1)] = pack("<I", riscv_pte_create_leaf(first_paddr + (page << RISCV32_4MB_BLOCK_BITS)))
             page += 1
 
         return {

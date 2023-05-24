@@ -8,10 +8,6 @@ ifeq ($(strip $(BUILD_DIR)),)
 $(error BUILD_DIR must be specified)
 endif
 
-ifeq ($(strip $(OPENSBI)),)
-$(error OPENSBI must be specified)
-endif
-
 ifeq ($(strip $(SEL4CP_SDK)),)
 $(error SEL4CP_SDK must be specified)
 endif
@@ -42,9 +38,8 @@ LIBS := -lsel4cp -Tsel4cp.ld
 
 IMAGE_FILE = $(BUILD_DIR)/loader.img
 REPORT_FILE = $(BUILD_DIR)/report.txt
-PAYLOAD_FILE = $(BUILD_DIR)/platform/generic/firmware/fw_payload.elf
 
-all: $(PAYLOAD_FILE)
+all: $(IMAGE_FILE)
 
 $(BUILD_DIR)/%.o: %.c Makefile
 	$(CC) -c $(CFLAGS) $< -o $@
@@ -57,7 +52,3 @@ $(BUILD_DIR)/hello.elf: $(addprefix $(BUILD_DIR)/, $(HELLO_OBJS))
 
 $(IMAGE_FILE) $(REPORT_FILE): $(addprefix $(BUILD_DIR)/, $(IMAGES)) hello.system
 	$(SEL4CP_TOOL) hello.system --search-path $(BUILD_DIR) --board $(SEL4CP_BOARD) --config $(SEL4CP_CONFIG) -o $(IMAGE_FILE) -r $(REPORT_FILE)
-
-$(PAYLOAD_FILE): $(IMAGE_FILE)
-	make -C $(OPENSBI) -j12 PLATFORM=generic CROSS_COMPILE=$(TOOLCHAIN)- FW_PAYLOAD_PATH=$(IMAGE_FILE) \
-	PLATFORM_RISCV_XLEN=64 PLATFORM_RISCV_ISA=rv64imac PLATFORM_RISCV_ABI=lp64 O=$(BUILD_DIR)

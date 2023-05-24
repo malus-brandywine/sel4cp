@@ -98,6 +98,8 @@ sel4cp_irq_ack(sel4cp_channel ch)
  * Whether these functions should become part of mainline libsel4cp API is yet
  * to be discussed.
  */
+// @ivanv: This API is also somewhat fragile since calling these repeteadly will
+// overwrite the previously queued signal or irq ack..
 static inline void
 sel4cp_notify_delayed(sel4cp_channel ch)
 {
