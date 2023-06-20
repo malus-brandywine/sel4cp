@@ -1488,7 +1488,7 @@ def _kernel_partial_boot(
     elif kernel_config.arch == KernelArch.AARCH64:
         device_size = 1 << 12
     else:
-        raise Exception(f"Unexpected kernel architecture {config.arch}")
+        raise Exception(f"Unexpected kernel architecture {kernel_config.arch}")
 
     for paddr in _kernel_device_addrs(kernel_config.arch, kernel_elf):
         device_memory.remove_region(paddr, paddr + device_size)
@@ -1660,14 +1660,14 @@ def arch_get_map_attrs(arch: KernelArch, cached: bool, perms: str) -> int:
     return attrs
 
 # @ivanv: TODO, support Huge page sizes for all architectures
-def arch_get_page_objects(arch: KernelArch) -> [int]:
+def arch_get_page_objects(arch: KernelArch) -> List[int]:
     if arch == KernelArch.AARCH64 or arch == KernelArch.RISCV64 or arch == KernelArch.X86_64:
         return [Sel4Object.SmallPage, Sel4Object.LargePage]
     else:
         raise Exception(f"Unexpected kernel architecture: {arch}")
 
 
-def arch_get_page_sizes(arch: KernelArch) -> [int]:
+def arch_get_page_sizes(arch: KernelArch) -> List[int]:
     if arch == KernelArch.AARCH64 or arch == KernelArch.RISCV64 or arch == KernelArch.X86_64:
         return [0x1000, 0x200_000]
     else:
