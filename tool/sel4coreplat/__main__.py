@@ -161,6 +161,7 @@ PD_CAPTABLE_BITS = 12
 PD_CAP_SIZE = 512
 PD_CAP_BITS = int(log2(PD_CAP_SIZE))
 PD_SCHEDCONTEXT_SIZE = (1 << 8)
+VM_SCHEDCONTEXT_SIZE = (1 << 8)
 
 
 def mr_page_bytes(mr: SysMemoryRegion) -> int:
@@ -660,6 +661,11 @@ def build_system(
     # Emulate kernel boot
 
     virtual_machines = [pd.virtual_machine for pd in system.protection_domains if pd.virtual_machine is not None]
+    virtual_cpus = [vcpu for vm in virtual_machines for vcpu in vm.vcpus]
+    virtual_cpus_by_vm = {
+        vm: [vcpu for vcpu in vm.vcpus]
+        for vm in virtual_machines
+    }
 
     ## Determine physical memory region used by the monitor
     initial_task_size = phys_mem_region_from_elf(monitor_elf, kernel_config.minimum_page_size).size
@@ -1130,18 +1136,20 @@ def build_system(
         mr_pages[mr].append(page)
 
     # TCBs
-    tcb_names = [f"TCB: PD={pd.name}" for pd in system.protection_domains]
-    tcb_names += [f"TCB: VM={vm.name}" for vm in virtual_machines]
-    tcb_objects = init_system.allocate_objects(kernel_config, Sel4Object.Tcb, tcb_names)
-    tcb_caps = [tcb_obj.cap_addr for tcb_obj in tcb_objects]
+    pd_tcb_names = [f"TCB: PD={pd.name}" for pd in system.protection_domains]
+    pd_tcb_objects = init_system.allocate_objects(kernel_config, Sel4Object.Tcb, pd_tcb_names)
+    vm_tcb_names = [f"TCB({vcpu.id_}): VM={vm.name}" for vm in virtual_machines for vcpu in vm.vcpus]
+    vm_tcb_objects = init_system.allocate_objects(kernel_config, Sel4Object.Tcb, vm_tcb_names)
+    tcb_caps = [tcb_obj.cap_addr for tcb_obj in pd_tcb_objects + vm_tcb_objects]
     # VCPUs
-    vcpu_names = [f"VCPU: VM={vm.name}" for vm in virtual_machines]
+    vcpu_names = [f"VCPU({vcpu.id_}): VM={vm.name}" for vm in virtual_machines for vcpu in vm.vcpus]
     vcpu_objects = init_system.allocate_objects(kernel_config, Sel4Object.Vcpu, vcpu_names)
     # SchedContexts
-    schedcontext_names = [f"SchedContext: PD={pd.name}" for pd in system.protection_domains]
-    schedcontext_names += [f"SchedContext: VM={vm.name}" for vm in virtual_machines]
-    schedcontext_objects = init_system.allocate_objects(kernel_config, Sel4Object.SchedContext, schedcontext_names, size=PD_SCHEDCONTEXT_SIZE)
-    schedcontext_caps = [sc.cap_addr for sc in schedcontext_objects]
+    pd_schedcontext_names = [f"SchedContext: PD={pd.name}" for pd in system.protection_domains]
+    pd_schedcontext_objects = init_system.allocate_objects(kernel_config, Sel4Object.SchedContext, pd_schedcontext_names, size=PD_SCHEDCONTEXT_SIZE)
+    vm_schedcontext_names = [f"SchedContext({vcpu.id_}): VM={vm.name}" for vm in virtual_machines for vcpu in vm.vcpus]
+    vm_schedcontext_objects = init_system.allocate_objects(kernel_config, Sel4Object.SchedContext, vm_schedcontext_names, size=VM_SCHEDCONTEXT_SIZE)
+    schedcontext_caps = [sc.cap_addr for sc in pd_schedcontext_objects + vm_schedcontext_objects]
     # Endpoints
     pds_with_endpoints = [pd for pd in system.protection_domains if pd.needs_ep]
     endpoint_names = ["EP: Monitor Fault"] + [f"EP: PD={pd.name}" for pd in pds_with_endpoints]
@@ -1392,7 +1400,7 @@ def build_system(
 
     # Create a fault endpoint cap for each virtual machine, this will
     # be the parent protection domain's endpoint.
-    for idx, vm in enumerate(virtual_machines, 1):
+    for vm in virtual_machines:
         # @ivanv: this is inefficient, we should store the root PD
         # in the XML parsing instead
         # Find the PD that has the virtual machine
@@ -1404,20 +1412,22 @@ def build_system(
         fault_ep_cap = pd_endpoint_objects[parent_pd].cap_addr
         # @ivanv: Right now there's nothing stopping the vm_id being
         # the same as a pd_id. We should change this.
-        badge = (1 << 62) | vm.id_
+        for vcpu in vm.vcpus:
+            badge = (1 << 62) | vcpu.id_
+            print(f"badge: 0x{badge:x}")
 
-        invocation = Sel4CnodeMint(
-            system_cnode_cap,
-            cap_slot,
-            system_cnode_bits,
-            root_cnode_cap,
-            fault_ep_cap,
-            kernel_config.cap_address_bits,
-            SEL4_RIGHTS_ALL,
-            badge
-        )
-        system_invocations.append(invocation)
-        cap_slot += 1
+            invocation = Sel4CnodeMint(
+                system_cnode_cap,
+                cap_slot,
+                system_cnode_bits,
+                root_cnode_cap,
+                fault_ep_cap,
+                kernel_config.cap_address_bits,
+                SEL4_RIGHTS_ALL,
+                badge
+            )
+            system_invocations.append(invocation)
+            cap_slot += 1
 
     final_cap_slot = cap_slot
 
@@ -1482,7 +1492,7 @@ def build_system(
 
     ## Mint access to the child TCB in the PD Cspace
     for cnode_obj, pd in zip(cnode_objects, system.protection_domains):
-        for maybe_child_tcb, maybe_child_pd in zip(tcb_objects, system.protection_domains):
+        for maybe_child_tcb, maybe_child_pd in zip(pd_tcb_objects, system.protection_domains):
             if maybe_child_pd.parent is pd:
                 cap_idx = BASE_TCB_CAP + maybe_child_pd.id_
                 system_invocations.append(
@@ -1497,41 +1507,49 @@ def build_system(
                         0)
                 )
 
-    ## Mint access to the VM's TCB in the PD Cspace
+    ## Mint access to the VM's TCBs in the root PD's Cspace
+    # @ivanv: should we use PD_CAP_BITS or create VM_CAP_BITS? or maybe make it generic e.g DOMAIN_CAP_BITS
     for cnode_obj, pd in zip(cnode_objects, system.protection_domains):
         if pd.virtual_machine:
-            for maybe_vm_tcb, maybe_vm in zip(tcb_objects[len(system.protection_domains):], virtual_machines):
-                if pd.virtual_machine == maybe_vm:
-                    cap_idx = BASE_VM_TCB_CAP + maybe_vm.id_
-                    system_invocations.append(
-                        Sel4CnodeMint(
-                            cnode_obj.cap_addr,
-                            cap_idx,
-                            PD_CAP_BITS,
-                            root_cnode_cap,
-                            maybe_vm_tcb.cap_addr,
-                            kernel_config.cap_address_bits,
-                            SEL4_RIGHTS_ALL,
-                            0)
-                    )
+            for maybe_vcpu_tcb, maybe_vcpu in zip(vm_tcb_objects, virtual_cpus):
+                for maybe_vm in virtual_machines:
+                    for vcpu in virtual_cpus_by_vm[maybe_vm]:
+                        if vcpu is maybe_vcpu:
+                            print("===== HERE")
+                            cap_idx = BASE_VM_TCB_CAP + maybe_vcpu.id_
+                            print(cap_idx)
+                            system_invocations.append(
+                                Sel4CnodeMint(
+                                    cnode_obj.cap_addr,
+                                    cap_idx,
+                                    PD_CAP_BITS,
+                                    root_cnode_cap,
+                                    maybe_vcpu_tcb.cap_addr,
+                                    kernel_config.cap_address_bits,
+                                    SEL4_RIGHTS_ALL,
+                                    0)
+                            )
 
-    ## Mint access to the VM's VCPU in the PD CSpace
+
+    ## Mint access to the VM's VCPUs in the root PD's CSpace
     for cnode_obj, pd in zip(cnode_objects, system.protection_domains):
         if pd.virtual_machine:
-            for vm_vcpu, vm in zip(vcpu_objects, virtual_machines):
-                if pd.virtual_machine == vm:
-                    cap_idx = BASE_VCPU_CAP + vm.id_
-                    system_invocations.append(
-                        Sel4CnodeMint(
-                            cnode_obj.cap_addr,
-                            cap_idx,
-                            PD_CAP_BITS,
-                            root_cnode_cap,
-                            vm_vcpu.cap_addr,
-                            kernel_config.cap_address_bits,
-                            SEL4_RIGHTS_ALL,
-                            0)
-                    )
+            for maybe_vcpu_obj, maybe_vcpu in zip(vcpu_objects, virtual_cpus):
+                for maybe_vm in virtual_machines:
+                    for vcpu in virtual_cpus_by_vm[maybe_vm]:
+                        if vcpu is maybe_vcpu:
+                            cap_idx = BASE_VCPU_CAP + maybe_vcpu.id_
+                            system_invocations.append(
+                                Sel4CnodeMint(
+                                    cnode_obj.cap_addr,
+                                    cap_idx,
+                                    PD_CAP_BITS,
+                                    root_cnode_cap,
+                                    maybe_vcpu_obj.cap_addr,
+                                    kernel_config.cap_address_bits,
+                                    SEL4_RIGHTS_ALL,
+                                    0)
+                            )
 
     for cc in system.channels:
         pd_a = system.pd_by_name[cc.pd_a]
@@ -1693,10 +1711,10 @@ def build_system(
             )
         )
 
-    # Initialise the TCBs
+    # Initialise the TCBs for PDs
     #
     # set scheduling parameters (SetSchedParams)
-    for idx, (pd, schedcontext_obj) in enumerate(zip(list(system.protection_domains) + virtual_machines, schedcontext_objects)):
+    for idx, (pd, schedcontext_obj) in enumerate(zip(system.protection_domains, pd_schedcontext_objects)):
         # FIXME: We don't use repeat here because in the near future PDs will set the sched params
         system_invocations.append(
             Sel4SchedControlConfigureFlags(
@@ -1710,7 +1728,7 @@ def build_system(
             )
         )
 
-    for tcb_obj, schedcontext_obj, pd in zip(tcb_objects, schedcontext_objects, list(system.protection_domains) + virtual_machines):
+    for tcb_obj, schedcontext_obj, pd in zip(pd_tcb_objects, pd_schedcontext_objects, system.protection_domains):
         system_invocations.append(Sel4TcbSetSchedParams(tcb_obj.cap_addr,
                                                         INIT_TCB_CAP_ADDRESS,
                                                         pd.priority,
@@ -1718,9 +1736,34 @@ def build_system(
                                                         schedcontext_obj.cap_addr,
                                                         fault_ep_endpoint_object.cap_addr))
 
+    # Initialise the TCBs for VMs
+    #
+    # set scheduling parameters (SetSchedParams)
+    for idx, (vcpu, schedcontext_obj) in enumerate(zip(virtual_cpus, vm_schedcontext_objects)):
+        # FIXME: We don't use repeat here because in the near future PDs will set the sched params
+        system_invocations.append(
+            Sel4SchedControlConfigureFlags(
+                kernel_boot_info.schedcontrol_cap + vcpu.cpu_affinity,
+                schedcontext_obj.cap_addr,
+                vcpu.budget,
+                vcpu.period,
+                0,
+                0x100 + idx,
+                0
+            )
+        )
+
+    for tcb_obj, schedcontext_obj, vcpu in zip(vm_tcb_objects, vm_schedcontext_objects, virtual_cpus):
+        system_invocations.append(Sel4TcbSetSchedParams(tcb_obj.cap_addr,
+                                                        INIT_TCB_CAP_ADDRESS,
+                                                        vcpu.priority,
+                                                        vcpu.priority,
+                                                        schedcontext_obj.cap_addr,
+                                                        fault_ep_endpoint_object.cap_addr))
+
     # @ivanv: This should only be available on the benchmark config
     # Copy the PD's TCB cap into their address space for development purposes.
-    for tcb_obj, cnode_obj in zip(tcb_objects, cnode_objects):
+    for tcb_obj, cnode_obj in zip(pd_tcb_objects, cnode_objects):
         system_invocations.append(Sel4CnodeCopy(cnode_obj.cap_addr,
                                                 TCB_CAP_IDX,
                                                 PD_CAP_BITS,
@@ -1729,18 +1772,31 @@ def build_system(
                                                 kernel_config.cap_address_bits,
                                                 SEL4_RIGHTS_ALL))
 
-    # set vspace / cspace (SetSpace)
-    invocation = Sel4TcbSetSpace(tcb_objects[0].cap_addr,
+    # Set the VSpace/CSpace (SetSpace) for every PD's TCB
+    invocation = Sel4TcbSetSpace(pd_tcb_objects[0].cap_addr,
                                  badged_fault_ep,
                                  cnode_objects[0].cap_addr,
                                  kernel_config.cap_address_bits - PD_CAP_BITS,
                                  vspace_objects[0].cap_addr,
                                  0)
-    invocation.repeat(len(system.protection_domains) + len(virtual_machines), tcb=1, fault_ep=1, cspace_root=1, vspace_root=1)
+    invocation.repeat(len(system.protection_domains), tcb=1, fault_ep=1, cspace_root=1, vspace_root=1)
     system_invocations.append(invocation)
 
-    # set IPC buffer
-    for tcb_obj, pd, ipc_buffer_obj in zip(tcb_objects, system.protection_domains, ipc_buffer_objects):
+    # Set the VSpace/CSpace (SetSpace) for every TCB in a VM (every virtual CPU)
+    if len(vm_tcb_objects) > 0
+        # @SMP: we should have separate vspace objects and cnode objects for vms
+        # @SMP: the names of vm objects should be better
+        invocation = Sel4TcbSetSpace(vm_tcb_objects[0].cap_addr,
+                                     badged_fault_ep + len(system.protection_domains),
+                                     cnode_objects[len(system.protection_domains)].cap_addr,
+                                     kernel_config.cap_address_bits - PD_CAP_BITS,
+                                     vspace_objects[len(system.protection_domains)].cap_addr,
+                                     0)
+        invocation.repeat(len(virtual_cpus), tcb=1, fault_ep=1, cspace_root=1, vspace_root=1)
+        system_invocations.append(invocation)
+
+    # set IPC buffer for PDs
+    for tcb_obj, pd, ipc_buffer_obj in zip(pd_tcb_objects, system.protection_domains, ipc_buffer_objects):
         ipc_buffer_vaddr, _ = pd_elf_files[pd].find_symbol("__sel4_ipc_buffer_obj")
         system_invocations.append(Sel4TcbSetIpcBuffer(tcb_obj.cap_addr, ipc_buffer_vaddr, ipc_buffer_obj.cap_addr,))
 
@@ -1748,7 +1804,7 @@ def build_system(
     # @ivanv: handle this better
     arch_tcb_write_regs = Sel4AARCH64TcbWriteRegisters if kernel_config.arch == KernelArch.AARCH64 else Sel4RISCVTcbWriteRegisters
     regs = Sel4Aarch64Regs if kernel_config.arch == KernelArch.AARCH64 else Sel4RiscvRegs
-    for tcb_obj, pd in zip(tcb_objects, system.protection_domains):
+    for tcb_obj, pd in zip(pd_tcb_objects, system.protection_domains):
         system_invocations.append(
             arch_tcb_write_regs(
                 tcb_obj.cap_addr,
@@ -1758,23 +1814,23 @@ def build_system(
             )
         )
     # bind the notification object
-    invocation = Sel4TcbBindNotification(tcb_objects[0].cap_addr, notification_objects[0].cap_addr)
+    invocation = Sel4TcbBindNotification(pd_tcb_objects[0].cap_addr, notification_objects[0].cap_addr)
     invocation.repeat(count=len(system.protection_domains), tcb=1, notification=1)
     system_invocations.append(invocation)
 
     # For all the virtual machines, we want to bind the TCB to the VCPU
-    if len(virtual_machines) > 0:
+    if len(virtual_cpus) > 0:
         if kernel_config.arch == KernelArch.AARCH64:
-            invocation = Sel4ArmVcpuSetTcb(vcpu_objects[0].cap_addr, tcb_objects[len(system.protection_domains)].cap_addr)
+            invocation = Sel4ArmVcpuSetTcb(vcpu_objects[0].cap_addr, vm_tcb_objects[0].cap_addr)
         elif kernel_config.arch == KernelArch.RISCV64:
-            invocation = Sel4RiscvVcpuSetTcb(vcpu_objects[0].cap_addr, tcb_objects[len(system.protection_domains)].cap_addr)
+            invocation = Sel4RiscvVcpuSetTcb(vcpu_objects[0].cap_addr, vm_tcb_objects[0].cap_addr)
         else:
             raise Exception(f"Unexpected kernel architecture: {kernel_config.arch}")
-        invocation.repeat(count=len(virtual_machines), vcpu=1, tcb=1)
+        invocation.repeat(count=len(virtual_cpus), vcpu=1, tcb=1)
         system_invocations.append(invocation)
 
-    # Resume (start) all the threads that are not virtual machines
-    invocation = Sel4TcbResume(tcb_objects[0].cap_addr)
+    # Resume (start) all the PD threads (not virtual machines)
+    invocation = Sel4TcbResume(pd_tcb_objects[0].cap_addr)
     invocation.repeat(count=len(system.protection_domains), tcb=1)
     system_invocations.append(invocation)
 

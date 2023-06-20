@@ -126,14 +126,19 @@ class Channel:
 
 
 @dataclass(frozen=True, eq=True)
-class VirtualMachine:
-    name: str
+class VirtualCpu:
     id_: int
     cpu_affinity: int
-    maps: Tuple[SysMap, ...]
-    priority: int
     budget: int
     period: int
+    priority: int
+
+
+@dataclass(frozen=True, eq=True)
+class VirtualMachine:
+    name: str
+    maps: Tuple[SysMap, ...]
+    vcpus: Tuple[VirtualCpu, ...]
 
 
 def _pd_tree_to_list(root_pd: ProtectionDomain, parent_pd: Optional[ProtectionDomain]) -> Tuple[ProtectionDomain, ...]:
@@ -428,14 +433,6 @@ def xml2vm(vm_xml: ET.Element, plat_desc: PlatformDescription) -> VirtualMachine
     _check_attrs(vm_xml, ("name", "id", "priority", "cpu"))
     name = checked_lookup(vm_xml, "name")
 
-    vm_id = int(checked_lookup(vm_xml, "id"), base=0)
-    if vm_id < 0 or vm_id > 255:
-        raise ValueError("id must be between 0 and 255")
-
-    cpu = int(vm_xml.attrib.get("cpu", "0"), base=0)
-    if cpu < 0  or cpu >= plat_desc.num_cpus:
-        raise ValueError(f"CPU affinity must be between 0 and {plat_desc.num_cpus - 1}")
-
     program_image: Optional[Path] = None
     device_tree: Optional[Path] = None
     init_ram_disk: Optional[Path] = None
@@ -444,6 +441,7 @@ def xml2vm(vm_xml: ET.Element, plat_desc: PlatformDescription) -> VirtualMachine
     priority = int(vm_xml.attrib.get("priority", "0"), base=0)
 
     maps = []
+    virtual_cpus = []
     for child in vm_xml:
         if child.tag == "map":
             _check_attrs(child, ("mr", "vaddr", "perms", "cached"))
@@ -452,17 +450,29 @@ def xml2vm(vm_xml: ET.Element, plat_desc: PlatformDescription) -> VirtualMachine
             perms = child.attrib.get("perms", "rw")
             cached = str_to_bool(child.attrib.get("cached", "true"))
             maps.append(SysMap(mr, vaddr, perms, cached, child))
+        elif child.tag == "virtual_cpu":
+            _check_attrs(child, ("id", "cpu"))
+            vcpu_id = int(checked_lookup(child, "id"))
+            if vcpu_id >= 64:
+                raise ValueError("id must be < 64")
+            if vcpu_id < 0:
+                raise ValueError("id must be >= 0")
+            vcpu_affinity = int(child.attrib.get("cpu", "0"), base=0)
+            if vcpu_affinity < 0  or vcpu_affinity >= plat_desc.num_cpus:
+                raise ValueError(f"Virtual CPU affinity must be between 0 and {plat_desc.num_cpus - 1}")
+            # Since the scheduling parameters are for each VCPU, they belong to each VCPU but for
+            # now we keep the budget and period of each VCPU in a VM uniform
+            virtual_cpus.append(VirtualCpu(vcpu_id, vcpu_affinity, budget, period, priority))
         else:
             raise UserError(f"Invalid XML element '{child.tag}': {child._loc_str}")  # type: ignore
 
+    if len(virtual_cpus) == 0:
+        raise ValueError("virtual_machine must have at least one virtual_cpu defined")
+
     return VirtualMachine(
         name,
-        vm_id,
-        cpu,
         tuple(maps),
-        priority,
-        budget,
-        period
+        tuple(virtual_cpus),
     )
 
 

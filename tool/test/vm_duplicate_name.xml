@@ -7,10 +7,14 @@
 <system>
     <protection_domain name="test-pd-1">
         <program_image path="test" />
-        <virtual_machine name="test-vm" id="0" />
+        <virtual_machine name="test-vm" id="0">
+            <virtual_cpu id="0" />
+        </virtual_machine>
     </protection_domain>
     <protection_domain name="test-pd-2">
         <program_image path="test" />
-        <virtual_machine name="test-vm" id="0" />
+        <virtual_machine name="test-vm" id="0">
+            <virtual_cpu id="0" />
+        </virtual_machine>
     </protection_domain>
 </system>
