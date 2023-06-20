@@ -13,6 +13,7 @@
         <program_image path="hello.elf" />
         <virtual_machine name="linux">
             <virtual_cpu id="0" />
+            <virtual_cpu id="1" />
 
             <map mr="guest_ram" vaddr="0x40000000" perms="rwx" />
             <map mr="serial" vaddr="0x9000000" perms="rw" cached="false" />

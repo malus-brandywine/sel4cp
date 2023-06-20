@@ -104,7 +104,7 @@ from sel4coreplat.sel4 import (
     SEL4_RISCV_EXECUTE_NEVER,
     SEL4_OBJECT_TYPE_NAMES,
 )
-from sel4coreplat.sysxml import ProtectionDomain, xml2system, SystemDescription, PlatformDescription
+from sel4coreplat.sysxml import ProtectionDomain, VirtualMachine, xml2system, SystemDescription, PlatformDescription
 from sel4coreplat.sysxml import SysMap, SysMemoryRegion # This shouldn't be needed here as such
 from sel4coreplat.loader import Loader, _check_non_overlapping
 
@@ -1228,14 +1228,32 @@ def build_system(
             if page_size == 0x1_000:
                 page_table_vaddrs.add(mask_bits(vaddr, 12 + 9))
 
+        # if not (kernel_config.hyp_mode and kernel_config.arm_pa_size_bits == 40):
+        #     if isinstance(domain, VirtualMachine):
+        #         for vcpu in domain.vcpus:
+        #             uds += [(idx + vcpu.id_, vaddr) for vaddr in sorted(upper_directory_vaddrs)]
+        #     else:
+        #         uds += [(idx, vaddr) for vaddr in sorted(upper_directory_vaddrs)]
+
+        # if isinstance(domain, VirtualMachine):
+        #     for vcpu in domain.vcpus:
+        #         ds += [(idx + vcpu.id_, vaddr) for vaddr in sorted(directory_vaddrs)]
+        #         pts += [(idx + vcpu.id_, vaddr) for vaddr in sorted(page_table_vaddrs)]
+        # else:
+        #     ds += [(idx, vaddr) for vaddr in sorted(directory_vaddrs)]
+        #     pts += [(idx, vaddr) for vaddr in sorted(page_table_vaddrs)]
+
         if not (kernel_config.hyp_mode and kernel_config.arm_pa_size_bits == 40):
             uds += [(idx, vaddr) for vaddr in sorted(upper_directory_vaddrs)]
         ds += [(idx, vaddr) for vaddr in sorted(directory_vaddrs)]
         pts += [(idx, vaddr) for vaddr in sorted(page_table_vaddrs)]
 
-    names = [domain.name for domain in list(system.protection_domains) + virtual_machines]
+    pd_names = [f"PD={pd.name}" for pd in system.protection_domains]
+    vm_names = [f"VM={vm.name}" for vm in virtual_machines]
+    names = pd_names + vm_names
     vspace_names = [f"VSpace: PD={pd.name}" for pd in system.protection_domains]
     vspace_names += [f"VSpace: VM={vm.name}" for vm in virtual_machines]
+    # vspace_names += [f"VSpace: VM(VCPU: 0x{vcpu.id_:x})={vm.name}" for vm in virtual_machines for vcpu in vm.vcpus]
     vspace_objects = init_system.allocate_objects(kernel_config, Sel4Object.Vspace, vspace_names)
 
     # @ivanv: fix this so that the name of the object is correct depending if it's
@@ -1245,7 +1263,7 @@ def build_system(
             ud_names = [f"PageUpperDirectory: PD/VM={names[idx]} VADDR=0x{vaddr:x}" for idx, vaddr in uds]
             ud_objects = init_system.allocate_objects(kernel_config, Sel4Object.PageUpperDirectory, ud_names)
 
-        d_names = [f"PageDirectory: PD/VM={names[idx]} VADDR=0x{vaddr:x}" for idx, vaddr in ds]
+        d_names = [f"PageDirectory: {names[idx]} VADDR=0x{vaddr:x}" for idx, vaddr in ds]
         d_objects = init_system.allocate_objects(kernel_config, Sel4Object.PageDirectory, d_names)
     elif kernel_config.arch == KernelArch.RISCV64:
         # This code assumes a 64-bit system with Sv39, which is actually all seL4 currently
@@ -1253,17 +1271,18 @@ def build_system(
         # FIXME: add support for Sv48 or even Sv57
         assert kernel_config.riscv_page_table_levels == 3
         # Allocating for 3-level page table
-        d_names = [f"PageTable: PD/VM={names[idx]} VADDR=0x{vaddr:x}" for idx, vaddr in ds]
+        d_names = [f"PageTable: {names[idx]} VADDR=0x{vaddr:x}" for idx, vaddr in ds]
         d_objects = init_system.allocate_objects(kernel_config, Sel4Object.PageTable, d_names)
     else:
         raise Exception(f"Unexpected kernel architecture: {kernel_config.arch}")
 
-    pt_names = [f"PageTable: PD/VM={names[idx]} VADDR=0x{vaddr:x}" for idx, vaddr in pts]
+    pt_names = [f"PageTable: {names[idx]} VADDR=0x{vaddr:x}" for idx, vaddr in pts]
     pt_objects = init_system.allocate_objects(kernel_config, Sel4Object.PageTable, pt_names)
 
     # Create CNodes - all CNode objects are the same size: 128 slots.
     cnode_names = [f"CNode: PD={pd.name}" for pd in system.protection_domains]
     cnode_names += [f"CNode: VM={vm.name}" for vm in virtual_machines]
+    # cnode_names += [f"CNode: VM(VCPU: 0x{vcpu.id_:x})={vm.name}" for vm in virtual_machines for vcpu in vm.vcpus]
     cnode_objects = init_system.allocate_objects(kernel_config, Sel4Object.CNode, cnode_names, size=PD_CAP_SIZE)
 
     # @ivanv: make a note why this is okay
@@ -1335,6 +1354,18 @@ def build_system(
             invocation.repeat(len(mr_pages[mr]), dest_index=1, src_obj=1)
             system_invocations.append(invocation)
 
+            # if isinstance(domain, VirtualMachine):
+            #     for vcpu_idx in range(len(domain.vcpus)):
+            #         page_descriptors.append((
+            #             system_cap_address_mask | cap_slot,
+            #             domain_idx + vcpu_idx,
+            #             vaddr,
+            #             rights,
+            #             attrs,
+            #             len(mr_pages[mr]),
+            #             mr_page_bytes(mr)
+            #         ))
+            # else:
             page_descriptors.append((
                 system_cap_address_mask | cap_slot,
                 domain_idx,
@@ -1414,7 +1445,6 @@ def build_system(
         # the same as a pd_id. We should change this.
         for vcpu in vm.vcpus:
             badge = (1 << 62) | vcpu.id_
-            print(f"badge: 0x{badge:x}")
 
             invocation = Sel4CnodeMint(
                 system_cnode_cap,
@@ -1515,9 +1545,7 @@ def build_system(
                 for maybe_vm in virtual_machines:
                     for vcpu in virtual_cpus_by_vm[maybe_vm]:
                         if vcpu is maybe_vcpu:
-                            print("===== HERE")
                             cap_idx = BASE_VM_TCB_CAP + maybe_vcpu.id_
-                            print(cap_idx)
                             system_invocations.append(
                                 Sel4CnodeMint(
                                     cnode_obj.cap_addr,
@@ -1679,8 +1707,8 @@ def build_system(
         raise Exception(f"Unexpected kernel architecture: {kernel_config.arch}")
 
     for map_cls, descriptors, objects in vspace_invocations:
-        for ((pd_idx, vaddr), obj) in zip(descriptors, objects):
-            vspace_obj = vspace_objects[pd_idx]
+        for ((idx, vaddr), obj) in zip(descriptors, objects):
+            vspace_obj = vspace_objects[idx]
             system_invocations.append(
                 map_cls(
                     obj.cap_addr,
@@ -1783,17 +1811,27 @@ def build_system(
     system_invocations.append(invocation)
 
     # Set the VSpace/CSpace (SetSpace) for every TCB in a VM (every virtual CPU)
-    if len(vm_tcb_objects) > 0
-        # @SMP: we should have separate vspace objects and cnode objects for vms
-        # @SMP: the names of vm objects should be better
-        invocation = Sel4TcbSetSpace(vm_tcb_objects[0].cap_addr,
-                                     badged_fault_ep + len(system.protection_domains),
-                                     cnode_objects[len(system.protection_domains)].cap_addr,
-                                     kernel_config.cap_address_bits - PD_CAP_BITS,
-                                     vspace_objects[len(system.protection_domains)].cap_addr,
-                                     0)
-        invocation.repeat(len(virtual_cpus), tcb=1, fault_ep=1, cspace_root=1, vspace_root=1)
-        system_invocations.append(invocation)
+    for vm_idx, vm in enumerate(virtual_machines):
+        for vcpu_idx in range(len(vm.vcpus)):
+            invocation = Sel4TcbSetSpace(vm_tcb_objects[vm_idx + vcpu_idx].cap_addr,
+                                         badged_fault_ep + len(system.protection_domains) + vm_idx,
+                                         cnode_objects[len(system.protection_domains)].cap_addr,
+                                         kernel_config.cap_address_bits - PD_CAP_BITS,
+                                         vspace_objects[len(system.protection_domains) + vm_idx].cap_addr,
+                                         0)
+            system_invocations.append(invocation)
+
+    # if len(vm_tcb_objects) > 0:
+    #     # @SMP: we should have separate vspace objects and cnode objects for vms
+    #     # @SMP: the names of vm objects should be better
+    #     invocation = Sel4TcbSetSpace(vm_tcb_objects[0].cap_addr,
+    #                                  badged_fault_ep + len(system.protection_domains),
+    #                                  cnode_objects[len(system.protection_domains)].cap_addr,
+    #                                  kernel_config.cap_address_bits - PD_CAP_BITS,
+    #                                  vspace_objects[len(system.protection_domains)].cap_addr,
+    #                                  0)
+    #     invocation.repeat(len(virtual_cpus), tcb=1, fault_ep=1, cspace_root=1, vspace_root=1)
+    #     system_invocations.append(invocation)
 
     # set IPC buffer for PDs
     for tcb_obj, pd, ipc_buffer_obj in zip(pd_tcb_objects, system.protection_domains, ipc_buffer_objects):
