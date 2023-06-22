@@ -239,7 +239,9 @@ SUPPORTED_BOARDS = (
             "KernelArmHypervisorSupport": True,
             "QEMU_MEMORY": 1024,
         },
-        examples = {}
+        examples = {
+            "hello": Path("example/qemu_arm_virt_hyp/hello")
+        }
     ),
     # BoardInfo(
     #     name="qemu_arm_virt_cortex_a72_hyp",
