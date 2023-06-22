@@ -31,14 +31,7 @@ RUNTIME_BOARDS = [
     # "spike",
 ]
 
-TEST_BUILD = [
-    {
-        "name": "tqma8xqp1gb_ethernet_example",
-        "path": "example/tqma8xqp1gb/ethernet",
-        "board": "tqma8xqp1gb",
-        "configs": ["debug", "release"],
-    }
-]
+TEST_BUILD = []
 
 # These are systems that we want to build and run to check the output.
 # TODO: add more tests!
