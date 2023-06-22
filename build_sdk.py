@@ -506,7 +506,7 @@ def tar_filter(tarinfo: TarInfo) -> TarInfo:
     assert tarinfo.isfile() or tarinfo.isdir()
     # Set the permissions properly
     if tarinfo.isdir():
-        tarinfo.mode = tarinfo.mode & ~0o777 | 0o557
+        tarinfo.mode = tarinfo.mode & ~0o777 | 0o775
     if tarinfo.isfile():
         if "/bin/" in tarinfo.name:
             # Assume everything in bin should be executable.
@@ -621,8 +621,6 @@ def build_sel4(
     )
     dest.unlink(missing_ok=True)
     copy(elf, dest)
-    # Make output read-only
-    dest.chmod(0o444)
 
     # @ivanv: comment, this is hard to follow
     include_dir = root_dir / "board" / board.name / config.name / "include"
@@ -636,7 +634,6 @@ def build_sel4(
             dest.parent.mkdir(exist_ok=True, parents=True)
             dest.unlink(missing_ok=True)
             copy(p, dest)
-            dest.chmod(0o444)
 
 
 def build_elf_component(
@@ -679,8 +676,6 @@ def build_elf_component(
     )
     dest.unlink(missing_ok=True)
     copy(elf, dest)
-    # Make output read-only
-    dest.chmod(0o444)
 
 
 def build_doc(root_dir):
@@ -725,23 +720,17 @@ def build_lib_component(
     dest = lib_dir / f"{component_name}.a"
     dest.unlink(missing_ok=True)
     copy(lib, dest)
-    # Make output read-only
-    dest.chmod(0o444)
 
 
     link_script = Path(component_name) / "sel4cp.ld"
     dest = lib_dir / "sel4cp.ld"
     dest.unlink(missing_ok=True)
     copy(link_script, dest)
-    # Make output read-only
-    dest.chmod(0o444)
 
     crt0 = build_dir / "crt0.o"
     dest = lib_dir / "crt0.o"
     dest.unlink(missing_ok=True)
     copy(crt0, dest)
-    # Make output read-only
-    dest.chmod(0o444)
 
     include_dir = root_dir / "board" / board.name / config.name / "include"
     source_dir = Path(component_name) / "include"
@@ -753,7 +742,6 @@ def build_lib_component(
         dest.parent.mkdir(exist_ok=True, parents=True)
         dest.unlink(missing_ok=True)
         copy(p, dest)
-        dest.chmod(0o444)
 
 
 def build_sel4_config_component(
@@ -774,7 +762,6 @@ def build_sel4_config_component(
 
     dest.unlink(missing_ok=True)
     copy(sel4_gen_config, dest)
-    dest.chmod(0o444)
 
     return sel4_config
 
@@ -878,7 +865,6 @@ def main() -> None:
                 dest.parent.mkdir(exist_ok=True, parents=True)
                 dest.unlink(missing_ok=True)
                 copy(p, dest)
-                dest.chmod(0o444)
 
     if not args.no_archive:
         # At this point we create a tar.gz file
