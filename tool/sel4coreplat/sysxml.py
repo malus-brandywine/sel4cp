@@ -14,7 +14,7 @@ import xml.etree.ElementTree as ET
 from typing import Dict, Iterable, Optional, Set, Tuple
 
 from sel4coreplat.util import str_to_bool, UserError
-from sel4coreplat.sel4 import Sel4ArmIrqTrigger
+from sel4coreplat.sel4 import Sel4IrqTrigger
 
 # @ivanv: when we parse mappings, should we warn that settings cached doesn't do anything on RISC-V systems?
 
@@ -72,7 +72,7 @@ class SysMap:
 class SysIrq:
     irq: int
     id_: int
-    trigger: str
+    trigger: Sel4IrqTrigger
 
 
 @dataclass(frozen=True, eq=True)
@@ -350,10 +350,12 @@ def xml2pd(pd_xml: ET.Element, plat_desc: PlatformDescription, is_child: bool=Fa
                 irq = int(checked_lookup(child, "irq"), base=0)
                 irq_id = int(checked_lookup(child, "id"), base=0)
                 trigger_str = child.attrib.get("trigger", "level")
+                # @ivanv: this assumes the platform's HAVE_IRQ_TRIGGER is set, we should be
+                # checking for that first.
                 if trigger_str == "level":
-                    trigger = Sel4ArmIrqTrigger.Level
+                    trigger = Sel4IrqTrigger.Level
                 elif trigger_str == "edge":
-                    trigger = Sel4ArmIrqTrigger.Edge
+                    trigger = Sel4IrqTrigger.Edge
                 else:
                     raise UserError(f"Invalid IRQ trigger '{trigger_str}': {child._loc_str}")
                 irqs.append(SysIrq(irq, irq_id, trigger))

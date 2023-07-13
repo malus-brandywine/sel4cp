@@ -312,7 +312,8 @@ def _get_arch_n_paging(kernel_config: KernelConfig, region: MemoryRegion) -> int
         raise Exception(f"Unknown kernel architecture {kernel_config.arch}")
 
 
-class Sel4ArmIrqTrigger(IntEnum):
+# @ivanv: double check that this is indeed the same across architectures (from memory it is)
+class Sel4IrqTrigger(IntEnum):
     Level = 0
     Edge = 1
 
@@ -1184,10 +1185,24 @@ class Sel4AsidPoolAssign(Sel4Invocation):
 
 
 @dataclass
+class Sel4IrqControlGet(Sel4Invocation):
+    _object_type = "IRQ Control"
+    _method_name = "Get"
+    _extra_caps = ("dest_root", )
+    label = Sel4Label.IRQIssueIRQHandler
+    irq_control: int
+    irq: int
+    dest_root: int
+    dest_index: int
+    dest_depth: int
+
+
+@dataclass
 class Sel4IrqControlGetTrigger(Sel4Invocation):
     _object_type = "IRQ Control"
     _method_name = "Get"
     _extra_caps = ("dest_root", )
+    # @ivanv: this is wrong for risc-v
     label = Sel4Label.ARMIRQIssueIRQHandlerTrigger
     irq_control: int
     irq: int

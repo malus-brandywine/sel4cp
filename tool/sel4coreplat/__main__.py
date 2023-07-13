@@ -70,6 +70,7 @@ from sel4coreplat.sel4 import (
     Sel4CnodeMint,
     Sel4CnodeCopy,
     Sel4UntypedRetype,
+    Sel4IrqControlGet,
     Sel4IrqControlGetTrigger,
     Sel4IrqHandlerSetNotification,
     Sel4SchedControlConfigureFlags,
@@ -1270,16 +1271,28 @@ def build_system(
     for pd in system.protection_domains:
         for sysirq in pd.irqs:
             cap_address = system_cap_address_mask | cap_slot
-            system_invocations.append(
-                Sel4IrqControlGetTrigger(
-                    IRQ_CONTROL_CAP_ADDRESS,
-                    sysirq.irq,
-                    sysirq.trigger.value,
-                    root_cnode_cap,
-                    cap_address,
-                    kernel_config.cap_address_bits
+
+            if kernel_config.irq_set_trigger_available:
+                system_invocations.append(
+                    Sel4IrqControlGetTrigger(
+                        IRQ_CONTROL_CAP_ADDRESS,
+                        sysirq.irq,
+                        sysirq.trigger.value,
+                        root_cnode_cap,
+                        cap_address,
+                        kernel_config.cap_address_bits
+                    )
                 )
-            )
+            else:
+                system_invocations.append(
+                    Sel4IrqControlGet(
+                        IRQ_CONTROL_CAP_ADDRESS,
+                        sysirq.irq,
+                        root_cnode_cap,
+                        cap_address,
+                        kernel_config.cap_address_bits
+                    )
+                )
 
             cap_slot += 1
             cap_address_names[cap_address] = f"IRQ Handler: irq={sysirq.irq:d}"
@@ -1939,6 +1952,7 @@ def main() -> int:
         have_fpu = sel4_config["HAVE_FPU"],
         hyp_mode = hyp_mode,
         num_cpus = int(sel4_config["MAX_NUM_NODES"]),
+        irq_set_trigger_available = bool(sel4_config["HAVE_SET_TRIGGER"]),
         # @ivanv: Perhaps there is a better way of seperating out arch specific config and regular config
         arm_pa_size_bits = arm_pa_size_bits,
         riscv_page_table_levels = int(sel4_config["PT_LEVELS"]) if "PT_LEVELS" in sel4_config else None,
