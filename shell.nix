@@ -8,8 +8,11 @@ let
     tex = pkgs.texlive.combine {
         inherit (pkgs.texlive) scheme-medium titlesec;
     };
-    cross = import <nixpkgs> {
+    cross_aarch64_none_elf = import <nixpkgs> {
         crossSystem = { config = "aarch64-none-elf"; };
+    };
+    cross_riscv64_none_elf = import <nixpkgs> {
+        crossSystem = { config = "riscv64-none-elf"; };
     };
 in
   pkgs.mkShell {
@@ -26,7 +29,8 @@ in
         pandoc
         tex
         cmake
-        cross.buildPackages.gcc10
+        cross_riscv64_none_elf.buildPackages.gcc10
+        cross_aarch64_none_elf.buildPackages.gcc10
         ninja
         libxml2
     ];
